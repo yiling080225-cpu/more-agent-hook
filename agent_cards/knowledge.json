@@ -1,0 +1,19 @@
+{
+  "name": "knowledge_agent",
+  "description": "RAG 检索增强、大规模文档理解、向量搜索",
+  "version": "1.0.0-mvp",
+  "capabilities": {
+    "input": ["text", "pdf", "document"],
+    "output": ["text", "json"],
+    "skills": [
+      "document_qa",
+      "knowledge_retrieval",
+      "semantic_search",
+      "content_summarization"
+    ]
+  },
+  "endpoint": "http://127.0.0.1:8000/a2a",
+  "mcp_servers": ["web-search", "file-tools"],
+  "model": "gemini-2.5-flash",
+  "note": "MVP 中通过 Supervisor 代理，完整版需要独立 LlamaIndex 服务"
+}

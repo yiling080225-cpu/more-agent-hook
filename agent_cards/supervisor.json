@@ -1,0 +1,17 @@
+{
+  "name": "federation_supervisor",
+  "description": "多模态 Agent 联邦总调度器，通过 A2A 协议协调各专项 Agent",
+  "version": "1.0.0-mvp",
+  "capabilities": {
+    "input": ["text", "image", "video", "audio"],
+    "output": ["text", "json", "code"],
+    "skills": [
+      "task_routing",
+      "agent_coordination",
+      "human_in_the_loop",
+      "multimodal_understanding",
+      "workflow_orchestration"
+    ]
+  },
+  "endpoint": "http://127.0.0.1:8000/a2a"
+}

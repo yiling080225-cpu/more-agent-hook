@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 联邦 — 监控面板</title>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+    --green: #4ade80; --red: #f87171; --yellow: #fbbf24;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Inter', system-ui, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  .header { background:var(--card); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+  .header h1 { font-size:20px; font-weight:700; }
+  .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; }
+  .status-dot.online { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .status-dot.offline { background:var(--red); }
+  .container { max-width:1200px; margin:0 auto; padding:24px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; }
+  .card h3 { font-size:14px; color:var(--muted); margin-bottom:12px; text-transform:uppercase; letter-spacing:.5px; }
+  .card h2 { font-size:28px; font-weight:700; }
+  .agent-list { display:flex; flex-direction:column; gap:8px; }
+  .agent-row { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:rgba(255,255,255,.03); border-radius:8px; }
+  .agent-row .name { font-weight:600; }
+  .agent-row .skills { font-size:12px; color:var(--muted); }
+  .badge { font-size:11px; padding:3px 8px; border-radius:12px; font-weight:600; }
+  .badge.online { background:rgba(74,222,128,.15); color:var(--green); }
+  .badge.offline { background:rgba(248,113,113,.15); color:var(--red); }
+  .badge.running { background:rgba(56,189,248,.15); color:var(--accent); }
+  .badge.completed { background:rgba(74,222,128,.15); color:var(--green); }
+  .badge.waiting { background:rgba(251,191,36,.15); color:var(--yellow); }
+  .badge.failed { background:rgba(248,113,113,.15); color:var(--red); }
+  .input-area { display:flex; flex-direction:column; gap:12px; }
+  textarea { width:100%; min-height:100px; background:rgba(0,0,0,.3); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:12px; font-size:14px; resize:vertical; }
+  textarea:focus { outline:none; border-color:var(--accent); }
+  button { padding:10px 20px; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px; }
+  .btn-primary { background:var(--accent); color:#0f172a; }
+  .btn-primary:hover { filter:brightness(1.1); }
+  .btn-danger { background:var(--red); color:#fff; }
+  .btn-sm { padding:4px 10px; font-size:12px; }
+  .log-area { max-height:300px; overflow-y:auto; font-family:'JetBrains Mono', monospace; font-size:12px; }
+  .log-entry { padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+  .log-entry .time { color:var(--muted); margin-right:8px; }
+  .log-entry .event { color:var(--accent); }
+  .log-entry .error { color:var(--red); }
+  .flex-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,.06); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#x1F3AF; Agent 联邦 — 监控面板</h1>
+  <div class="flex-row">
+    <span class="badge" id="sysStatus">检测中...</span>
+    <button class="btn-primary btn-sm" onclick="refreshAll()">刷新</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="grid">
+    <!-- 系统概览 -->
+    <div class="card">
+      <h3>系统概览</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><div style="color:var(--muted);font-size:12px;">Agent 数</div><h2 id="agentCount">-</h2></div>
+        <div><div style="color:var(--muted);font-size:12px;">可用 Agent</div><h2 id="agentAvailable" style="color:var(--green)">-</h2></div>
+        <div><div style="color:var(--muted);font-size:12px;">MCP 工具</div><h2 id="mcpCount">-</h2></div>
+        <div><div style="color:var(--muted);font-size:12px;">活跃工作流</div><h2 id="wfCount">-</h2></div>
+      </div>
+    </div>
+
+    <!-- Agent 列表 -->
+    <div class="card agent-list" id="agentList" style="grid-row:span 2;">
+      <h3>Agent 联邦成员</h3>
+      <div style="color:var(--muted);font-size:13px;">加载中...</div>
+    </div>
+
+    <!-- 快速测试 -->
+    <div class="card">
+      <h3>快速测试</h3>
+      <div class="input-area">
+        <textarea id="taskInput" placeholder="描述你的需求...&#10;例如: 做一个卖手工艺品的电商网站首页"></textarea>
+        <div class="flex-row">
+          <button class="btn-primary" onclick="submitTask()">提交任务</button>
+          <select id="taskMode" style="background:rgba(0,0,0,.3);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:8px;">
+            <option value="route">仅路由分析</option>
+            <option value="execute">路由+执行</option>
+            <option value="workflow">完整工作流</option>
+          </select>
+        </div>
+      </div>
+      <div id="taskResult" style="margin-top:12px;font-size:13px;color:var(--muted);"></div>
+    </div>
+
+    <!-- 活动日志 -->
+    <div class="card" style="grid-column:1/-1;">
+      <h3>事件日志</h3>
+      <div class="log-area" id="logArea">
+        <div class="log-entry"><span class="time">--:--:--</span> 等待事件...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/';
+
+function $(id) { return document.getElementById(id); }
+
+function log(msg, cls='event') {
+  const now = new Date().toLocaleTimeString();
+  const area = $('logArea');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="time">${now}</span><span class="${cls}">${msg}</span>`;
+  area.prepend(entry);
+  if (area.children.length > 50) area.removeChild(area.lastChild);
+}
+
+async function refreshAll() {
+  try {
+    const health = await fetch(API + 'health').then(r => r.json());
+    $('sysStatus').textContent = health.status === 'healthy' ? '● 健康' : '● 异常';
+    $('sysStatus').className = 'badge ' + (health.status === 'healthy' ? 'online' : 'offline');
+
+    const sys = await fetch(API + 'system/info').then(r => r.json());
+    $('agentCount').textContent = sys.agents?.total_agents || 0;
+    $('agentAvailable').textContent = sys.agents?.available_agents || 0;
+    $('mcpCount').textContent = sys.mcp_tools || 0;
+    $('wfCount').textContent = sys.active_workflows || 0;
+
+    // Agent 列表
+    const agents = sys.agents?.agents || {};
+    const list = $('agentList');
+    list.innerHTML = '<h3>Agent 联邦成员</h3>';
+    for (const [name, info] of Object.entries(agents)) {
+      const status = info.available ? 'online' : 'offline';
+      const skills = (info.skills || []).slice(0,3).join(', ');
+      list.innerHTML += `
+        <div class="agent-row">
+          <div>
+            <div class="name">${name}</div>
+            <div class="skills">${skills || '-'}</div>
+          </div>
+          <span class="badge ${status}">${status === 'online' ? '可用' : '离线'}</span>
+        </div>`;
+    }
+
+    log('系统状态已刷新', 'event');
+  } catch(e) {
+    log('刷新失败: ' + e.message, 'error');
+  }
+}
+
+async function submitTask() {
+  const text = $('taskInput').value.trim();
+  if (!text) { alert('请输入需求描述'); return; }
+
+  const mode = $('taskMode').value;
+  log(`提交任务 (${mode}): ${text.slice(0,60)}...`);
+  $('taskResult').innerHTML = '<span style="color:var(--yellow)">执行中...</span>';
+
+  try {
+    let url, body;
+    if (mode === 'workflow') {
+      url = API + 'workflow/start';
+      body = { input: { text: text, images: [], videos: [], files: [], context: {} } };
+    } else {
+      url = API + 'supervisor/' + mode;
+      body = { text: text, images: [], videos: [], files: [], context: {} };
+    }
+
+    const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const data = await resp.json();
+
+    if (data.status === 'failed') {
+      $('taskResult').innerHTML = `<span style="color:var(--red)">失败:</span> ${data.error || JSON.stringify(data)}`;
+      log('任务失败: ' + (data.error || ''), 'error');
+    } else {
+      $('taskResult').innerHTML = `<span style="color:var(--green)">完成</span> — 模式: ${mode}<br><pre style="font-size:11px;margin-top:8px;max-height:200px;overflow-y:auto;">${JSON.stringify(data, null, 2)}</pre>`;
+      log('任务完成: ' + (data.result?.routing?.agent || 'direct'), 'event');
+    }
+
+    refreshAll();
+  } catch(e) {
+    $('taskResult').innerHTML = `<span style="color:var(--red)">错误:</span> ${e.message}`;
+    log('请求错误: ' + e.message, 'error');
+  }
+}
+
+// 启动时加载
+refreshAll();
+// 每 30 秒自动刷新
+setInterval(refreshAll, 30000);
+</script>
+</body>
+</html>

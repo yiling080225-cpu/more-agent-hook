@@ -1,0 +1,62 @@
+# MCP Server 配置 — 多模态 Agent 联邦 MVP
+# 本地版仅包含内置工具，完整版取消注释即可接入外部 MCP Server
+
+servers:
+  # ============ 内置工具 (自动加载) ============
+  file-tools:
+    type: builtin
+    capabilities:
+      - read_file
+      - write_file
+      - list_directory
+
+  search-tools:
+    type: builtin
+    capabilities:
+      - web_search
+      - text_search
+
+  code-tools:
+    type: builtin
+    capabilities:
+      - validate_python
+      - format_code
+
+  # ============ 外部 MCP Server (需要时取消注释) ============
+  # github-mcp-server:
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-github"]
+  #   env:
+  #     GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+  #
+  # brave-search-mcp:
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-brave-search"]
+  #   env:
+  #     BRAVE_API_KEY: ${BRAVE_API_KEY}
+  #
+  # slack-mcp-server:
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-slack"]
+  #   env:
+  #     SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+  #
+  # figma-mcp-server:
+  #   command: npx
+  #   args: ["-y", "figma-mcp"]
+  #   env:
+  #     FIGMA_ACCESS_TOKEN: ${FIGMA_TOKEN}
+
+# 安全策略
+security:
+  rbac_enabled: false  # MVP 简化，完整版启用
+  sensitive_operations:
+    - deployment
+    - write_file
+  human_approval_required:
+    - write_file
+
+# 监控
+observability:
+  logging_level: INFO
+  cost_tracking: true

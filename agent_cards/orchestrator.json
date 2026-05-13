@@ -1,0 +1,19 @@
+{
+  "name": "workflow_orchestrator",
+  "description": "状态机图编排、Checkpoint 持久化、长周期工作流管理",
+  "version": "1.0.0-mvp",
+  "capabilities": {
+    "input": ["text", "json"],
+    "output": ["json", "workflow_state"],
+    "skills": [
+      "state_machine_orchestration",
+      "checkpoint_management",
+      "human_in_the_loop_coordination",
+      "parallel_task_management",
+      "error_recovery"
+    ]
+  },
+  "endpoint": "http://127.0.0.1:8000/a2a",
+  "model": "gemini-2.5-flash",
+  "max_context_tokens": 1048576
+}

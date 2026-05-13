@@ -1,0 +1,20 @@
+{
+  "name": "crew_collaboration_agent",
+  "description": "多角色内容协作、Sequential 模式、产品文案与市场分析",
+  "version": "1.0.0-mvp",
+  "capabilities": {
+    "input": ["text", "json"],
+    "output": ["text", "json"],
+    "skills": [
+      "content_creation",
+      "market_analysis",
+      "prd_generation",
+      "product_description",
+      "seo_keyword_research"
+    ]
+  },
+  "endpoint": "http://127.0.0.1:8000/a2a",
+  "mcp_servers": ["web-search"],
+  "model": "gemini-2.5-flash",
+  "note": "MVP 中通过 Supervisor 代理，完整版需要独立 CrewAI 服务"
+}

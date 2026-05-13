@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  agent-federation:
+    build: .
+    container_name: agent-federation-mvp
+    ports:
+      - "8000:8000"   # Gateway + Dashboard
+      - "8001:8001"   # Multimodal Agent
+      - "8002:8002"   # Code Agent
+      - "8003:8003"   # Review Agent
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./agent_cards:/app/agent_cards
+    restart: unless-stopped
