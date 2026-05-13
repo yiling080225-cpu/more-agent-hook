@@ -42,3 +42,12 @@ htmlcov/
 
 # Claude
 .claude/
+
+# Preview & References
+preview/
+references/images/*
+references/web/*
+references/project/*
+!references/images/.gitkeep
+!references/web/.gitkeep
+!references/project/.gitkeep
