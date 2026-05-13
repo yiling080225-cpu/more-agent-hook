@@ -1,3 +1,4 @@
+from federation_sdk.client import FederationClient
 from federation_sdk.exceptions import (
     ConnectionError,
     FederationError,
@@ -19,6 +20,7 @@ from federation_sdk.models import (
 )
 
 __all__ = [
+    "FederationClient",
     "TaskResult",
     "TaskStatus",
     "SystemInfo",
