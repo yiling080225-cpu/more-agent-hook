@@ -71,9 +71,9 @@ class MultimodalAgent(BaseAgent):
         task_type = task.get("task_type", "ui_design")
 
         if self._use_gemini:
-            return await self._execute_gemini(text, images, task_type, context)
+            return await self._execute_gemini(text, images, task_type, context, task)
         elif self._use_anthropic:
-            return await self._execute_anthropic(text, images, task_type, context)
+            return await self._execute_anthropic(text, images, task_type, context, task)
         else:
             logger.warning("no_api_key_available", task_type=task_type)
             return {
@@ -87,11 +87,11 @@ class MultimodalAgent(BaseAgent):
     # ==================== Gemini 路径 ====================
 
     async def _execute_gemini(
-        self, text: str, images: List[str], task_type: str, context: Dict[str, Any]
+        self, text: str, images: List[str], task_type: str, context: Dict[str, Any], task: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         from google.genai import types
 
-        prompt_text = self._build_prompt(text, task_type)
+        prompt_text = self._build_prompt(text, task_type, task)
         contents = [prompt_text]
         for img in images:
             img_data = self._load_image(img)
@@ -117,9 +117,9 @@ class MultimodalAgent(BaseAgent):
     # ==================== Anthropic/DeepSeek 路径 ====================
 
     async def _execute_anthropic(
-        self, text: str, images: List[str], task_type: str, context: Dict[str, Any]
+        self, text: str, images: List[str], task_type: str, context: Dict[str, Any], task: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        prompt = self._build_prompt(text, task_type)
+        prompt = self._build_prompt(text, task_type, task)
 
         # 构建消息内容 (支持图片)
         content = []
@@ -157,25 +157,137 @@ class MultimodalAgent(BaseAgent):
 
     # ==================== 辅助方法 ====================
 
-    def _build_prompt(self, text: str, task_type: str) -> str:
-        prompts = {
-            "ui_design": """你是一个资深 UI/UX 设计师。根据用户的描述和图片，生成一份完整的 UI 设计规范 (纯 JSON 格式，不要 markdown 代码块)。
+    def _build_prompt(self, text: str, task_type: str, task: Dict[str, Any] = None) -> str:
+        """构建 prompt，注入用户偏好 (风格/主题/输出框架)。"""
+        style_hint = ""
+        task = task or {}
+        style = task.get("style", "")
+        theme = task.get("theme", "")
+        output_format = task.get("output_format", "")
 
+        if style:
+            style_map = {
+                "modern": "现代风格：圆角卡片、渐变、微阴影（Material Design 风格）",
+                "minimal": "极简风格：大量留白、细线条、无阴影、克制用色",
+                "glassmorphism": "毛玻璃风格：半透明面板、backdrop-filter 模糊、层次感",
+                "dark": "暗夜风格：深色背景 (#121212)、低亮度荧光色、高对比",
+                "brutalist": "粗野主义：粗黑边框、撞色、Raw 原始风格、大字体",
+                "cyberpunk": "赛博朋克：霓虹灯效、深紫/青绿配色、故障风",
+                "neumorphism": "新拟态：柔和浮雕、单色系、内阴影、低对比",
+                "classic": "经典风格：衬线字体、传统布局、稳重配色",
+                "retro": "复古风格：像素字体、高饱和、80-90 年代风格",
+                "organic": "自然风格：圆润形状、大地色系、柔和过渡",
+                "luxury": "奢华风格：金色点缀、衬线体、暗色质感",
+                "playful": "活泼风格：鲜艳色彩、弹跳动画、卡通元素",
+            }
+            style_hint += f"\n设计风格要求: {style_map.get(style, style)}\n"
+
+        if theme:
+            theme_map = {
+                "ocean": "主色调 #2563EB 海洋蓝",
+                "forest": "主色调 #16A34A 森林绿",
+                "sunset": "主色调 #EA580C 日落橙",
+                "rose": "主色调 #E11D48 玫瑰红",
+                "lavender": "主色调 #7C3AED 薰衣草紫",
+                "midnight": "主色调 #1E293B 午夜蓝黑",
+                "teal": "主色调 #0D9488 青碧",
+                "amber": "主色调 #D97706 琥珀金",
+                "slate": "主色调 #64748B 石板灰",
+            }
+            if theme.startswith("#"):
+                style_hint += f"自定义主色调: {theme}\n"
+            else:
+                style_hint += f"{theme_map.get(theme, f'主色调: {theme}')}\n"
+
+        if output_format and output_format != "both":
+            fmt_map = {"html": "输出纯 HTML+CSS", "react": "输出 React 组件", "vue": "输出 Vue 组件", "flutter": "输出 Flutter 代码"}
+            style_hint += f"输出框架: {fmt_map.get(output_format, output_format)}\n"
+
+        prompts = {
+            "ui_design": f"""你是一个资深 UI/UX 设计师。根据用户的描述和图片，生成一份完整的 UI 设计规范 (纯 JSON 格式，不要 markdown 代码块)。
+{style_hint}
 返回 JSON:
-{
-    "design_system": {
+{{
+    "design_system": {{
         "color_palette": ["#hex"],
-        "typography": {"heading": "font", "body": "font"},
+        "typography": {{"heading": "font", "body": "font"}},
         "spacing": "值",
         "border_radius": "值"
-    },
-    "pages": [{"name": "页面名", "components": ["组件"], "layout": "布局"}],
-    "component_library": {"组件名": {"props": [], "states": [], "description": ""}},
+    }},
+    "pages": [{{"name": "页面名", "components": ["组件"], "layout": "布局"}}],
+    "component_library": {{"组件名": {{"props": [], "states": [], "description": ""}}}},
     "interactions": ["交互描述"],
     "accessibility": ["无障碍要点"]
-}
+}}
 
-用户需求: """ + text,
+用户需求: {text}""",
+
+            "web_page": f"""你是一个资深前端设计师和全栈开发者。根据用户需求，生成一个完整的、可直接在浏览器中打开的 HTML 页面。
+{style_hint}
+
+技术要求:
+- 单文件 HTML，所有 CSS 写在 <style> 标签中，JS 写在 <script> 标签中
+- 使用现代 CSS (flexbox/grid, CSS 变量, 过渡动画)
+- 响应式设计 (mobile-first, 断点 768px/1024px)
+- 美观的视觉设计——不要默认浏览器样式
+- 真实的中文内容，不要 Lorem ipsum
+- 交互效果: hover 状态、过渡动画、微交互
+- 无障碍: aria 标签、键盘导航、足够的色彩对比度
+
+返回纯 JSON:
+{{
+    "html": "完整的 HTML 代码 (含 <!DOCTYPE html> 声明)",
+    "description": "页面功能说明",
+    "features": ["关键特性列表"]
+}}
+
+用户需求: {text}""",
+
+            "svg_diagram": f"""你是一个资深图形/数据可视化设计师。根据用户描述，生成一个精美的 SVG 矢量图。
+{style_hint}
+
+要求:
+- 完整独立的 SVG 元素 (含 xmlns, viewBox)
+- 清晰的视觉层次和信息架构
+- 合适的颜色搭配和字体大小
+- 响应式 viewBox，可在不同尺寸下缩放
+- 如果是流程图/架构图: 使用圆角矩形、清晰箭头、分组框
+- 如果是数据图表: 坐标轴、标签、图例完整
+
+返回纯 JSON:
+{{
+    "svg": "<svg>...</svg> (完整 SVG 代码)",
+    "description": "图表说明",
+    "viewBox": "0 0 W H"
+}}
+
+用户需求: {text}""",
+
+            "cad_from_sketch": f"""你是一个 CAD/机械工程师。用户提供了一张草图/图片，请分析它并生成 OpenSCAD 3D 模型代码。
+
+分析步骤:
+1. 识别草图中的形状 (圆柱、立方体、孔洞、倒角等)
+2. 估算尺寸比例关系
+3. 生成参数化的 OpenSCAD 代码
+
+OpenSCAD 语法要点:
+- cube([x, y, z]) 或 cube([x, y, z], center=true)
+- cylinder(h=10, r=5) 或 cylinder(h=10, r1=3, r2=5)
+- difference() {{ 主体; 切除部分; }}
+- union() {{ 部件1; 部件2; }}
+- translate([x, y, z]) / rotate([x, y, z])
+- sphere(r=10)
+- linear_extrude(height=10) + 2D 图形
+
+返回纯 JSON:
+{{
+    "analysis": "对草图的描述分析 (形状/尺寸/结构)",
+    "estimated_dimensions": {{"unit": "mm", "width": N, "height": N, "depth": N}},
+    "openscad_code": "完整的参数化 OpenSCAD 代码 (含变量定义和注释)",
+    "render_hint": "建议的渲染参数 (如 $fn=50)"
+}}
+
+用户需求: {text}""",
 
             "visual_analysis": "分析这张图片/设计的视觉元素：1.颜色方案 2.布局结构 3.UI组件 4.视觉层次 5.改进建议。用户补充: " + text,
 

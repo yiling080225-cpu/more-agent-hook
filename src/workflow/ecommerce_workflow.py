@@ -110,13 +110,28 @@ def create_a2a_delegate_node(agent_name: str, task_builder, result_key: str):
     return delegate
 
 
+def _get_user_prefs(state: WorkflowState) -> Dict[str, Any]:
+    """从 requirements 中提取用户偏好设置。"""
+    reqs = state.get("requirements", {})
+    ctx = reqs.get("context", {})
+    return {
+        "style": ctx.get("style", "modern"),
+        "theme": ctx.get("theme"),
+        "output_format": ctx.get("output_format", "both"),
+        "sandbox": ctx.get("sandbox", True),
+        "allow_search": ctx.get("allow_search"),
+    }
+
+
 def _build_multimodal_task(state: WorkflowState) -> Dict[str, Any]:
     """构建多模态分析任务"""
     reqs = state.get("requirements", {})
+    prefs = _get_user_prefs(state)
     return {
         "text": reqs.get("text", "分析需求并生成 UI 设计规范"),
         "images": reqs.get("images", []),
         "task_type": "ui_design",
+        **prefs,
     }
 
 
@@ -124,12 +139,14 @@ def _build_code_frontend_task(state: WorkflowState) -> Dict[str, Any]:
     """构建前端代码生成任务"""
     ui_spec = state.get("ui_spec", {})
     reqs = state.get("requirements", {})
+    prefs = _get_user_prefs(state)
     return {
         "type": "frontend",
         "spec": {
             "ui_spec": ui_spec,
             "requirements": reqs.get("text", ""),
             "tech_stack": "Next.js 14 + TypeScript + Tailwind CSS",
+            **prefs,
         },
     }
 
@@ -138,12 +155,14 @@ def _build_code_backend_task(state: WorkflowState) -> Dict[str, Any]:
     """构建后端代码生成任务"""
     backend_spec = state.get("backend_spec", {})
     reqs = state.get("requirements", {})
+    prefs = _get_user_prefs(state)
     return {
         "type": "backend",
         "spec": {
             "backend_spec": backend_spec,
             "requirements": reqs.get("text", ""),
             "tech_stack": "FastAPI + Python 3.12 + SQLAlchemy + PostgreSQL",
+            **prefs,
         },
     }
 
@@ -246,28 +265,70 @@ def _local_code_review(code_parts: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _write_files_to_preview(code_result: Any, prefix: str = "") -> list[str]:
+    """将代码结果写入 preview/ 文件夹，返回文件路径列表。"""
+    from pathlib import Path
+    preview_dir = Path("preview")
+    preview_dir.mkdir(exist_ok=True)
+
+    written = []
+    if isinstance(code_result, dict):
+        result = code_result.get("result", code_result)
+        code = result.get("code", {}) if isinstance(result, dict) else {}
+        if isinstance(code, dict):
+            files = code.get("files", [])
+            for f in files:
+                path = preview_dir / f.get("path", f"{prefix}output.txt")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f.get("content", ""), encoding="utf-8")
+                written.append(str(path))
+        elif isinstance(code, str) and code.strip():
+            # 直接文本内容，根据前缀判断扩展名
+            ext_map = {"html": ".html", "svg": ".svg", "scad": ".scad", "py": ".py", "js": ".js"}
+            ext = ext_map.get(prefix, ".txt")
+            path = preview_dir / f"{prefix}_output{ext}"
+            path.write_text(code, encoding="utf-8")
+            written.append(str(path))
+
+        # 处理直接返回的 html/svg 字段
+        for key, ext in [("html", ".html"), ("svg", ".svg"), ("openscad_code", ".scad")]:
+            content = result.get(key)
+            if content and isinstance(content, str):
+                path = preview_dir / f"{prefix}_{key}{ext}"
+                path.write_text(content, encoding="utf-8")
+                written.append(str(path))
+
+    return written
+
+
 def create_deploy_node():
-    """节点: 部署通知 (MVP 中生成部署摘要，不实际部署)"""
+    """节点: 部署 — 写入 preview/ 文件夹"""
     async def deploy(state: WorkflowState) -> Dict[str, Any]:
         logger.info("node_deploy", thread_id=state.get("thread_id"))
 
-        # 生成部署摘要
         code_frontend = state.get("code_frontend", {})
         code_backend = state.get("code_backend", {})
         review_results = state.get("review_results", [])
 
+        # 写入文件
+        frontend_files = _write_files_to_preview(code_frontend, "frontend")
+        backend_files = _write_files_to_preview(code_backend, "backend")
+
+        all_files = frontend_files + backend_files
+
         summary = {
             "status": "completed",
+            "files": all_files,
             "frontend_files": _count_files(code_frontend),
             "backend_files": _count_files(code_backend),
             "review_rounds": len(review_results),
             "final_verdict": review_results[-1].get("verdict", "unknown") if review_results else "no_review",
-            "preview_url": "http://localhost:3000  (本地预览)",
+            "preview_dir": str(Path("preview").resolve()),
             "deployment_ready": True,
         }
 
         return {
-            "deployment_url": summary["preview_url"],
+            "deployment_url": str(Path("preview").resolve()),
             "status": "completed",
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "deployment_summary": summary,
