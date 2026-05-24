@@ -115,11 +115,9 @@ def _get_user_prefs(state: WorkflowState) -> Dict[str, Any]:
     reqs = state.get("requirements", {})
     ctx = reqs.get("context", {})
     return {
-        "style": ctx.get("style", "modern"),
-        "theme": ctx.get("theme"),
-        "output_format": ctx.get("output_format", "both"),
-        "sandbox": ctx.get("sandbox", True),
-        "allow_search": ctx.get("allow_search"),
+        "style": ctx.get("style", ""),
+        "theme": ctx.get("theme", ""),
+        "output_format": ctx.get("output_format", ""),
     }
 
 

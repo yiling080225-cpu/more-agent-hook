@@ -9,6 +9,7 @@ from anthropic import AsyncAnthropic
 from ..config import settings
 from ..api.schemas import AgentCard
 from .base import BaseAgent
+from ..utils._content import extract_text
 
 logger = structlog.get_logger()
 
@@ -72,10 +73,8 @@ class ReviewAgent(BaseAgent):
 
     def __init__(self):
         super().__init__(card=REVIEW_AGENT_CARD)
-        kwargs = {"api_key": settings.anthropic_api_key}
-        if settings.anthropic_base_url:
-            kwargs["base_url"] = settings.anthropic_base_url
-        self.client = AsyncAnthropic(**kwargs)
+        cfg = settings.client_for("review")
+        self.client = AsyncAnthropic(**cfg)
         self.model = settings.review_model
         self.max_rounds = 3
         self.token_budget = 50000
@@ -91,7 +90,7 @@ class ReviewAgent(BaseAgent):
         - previous_comments: 上一轮的审查意见 (用于修复验证)
         - task_id: 用于追踪对话历史
         """
-        code = task.get("code", "")
+        code = task.get("code") or task.get("text", "")
         review_round = task.get("review_round", 1)
         previous_comments = task.get("previous_comments", [])
         task_id = task.get("task_id", "unknown")
@@ -125,7 +124,8 @@ class ReviewAgent(BaseAgent):
                 "tokens_exceeded": True,
             }
 
-        return await self._review_code(code, review_round, previous_comments, task_id)
+        return await self._review_code(code, review_round, previous_comments, task_id,
+                                        files_hint=self._format_files_hint(task))
 
     async def _review_code(
         self,
@@ -133,6 +133,7 @@ class ReviewAgent(BaseAgent):
         round_num: int,
         previous_comments: List[Dict[str, Any]],
         task_id: str,
+        files_hint: str = "",
     ) -> Dict[str, Any]:
         """调用 Claude 进行代码审查"""
         # 构建代码文本
@@ -164,7 +165,7 @@ class ReviewAgent(BaseAgent):
                 messages=[{"role": "user", "content": user_message}],
             )
 
-            content = resp.content[0].text
+            content = extract_text(resp.content)
             try:
                 review_result = json.loads(content)
             except json.JSONDecodeError:
@@ -184,6 +185,7 @@ class ReviewAgent(BaseAgent):
                 "success": True,
                 **review_result,
                 "round": round_num,
+                "model_used": self.model,
                 "tokens_used": resp.usage.input_tokens + resp.usage.output_tokens,
                 "budget_remaining": self.token_budget - (resp.usage.input_tokens + resp.usage.output_tokens),
             }

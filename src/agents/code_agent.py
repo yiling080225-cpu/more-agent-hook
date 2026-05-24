@@ -8,6 +8,7 @@ from anthropic import AsyncAnthropic
 from ..config import settings
 from ..api.schemas import AgentCard
 from .base import BaseAgent
+from ..utils._content import extract_text
 
 logger = structlog.get_logger()
 
@@ -136,16 +137,17 @@ class CodeAgent(BaseAgent):
 
     def __init__(self):
         super().__init__(card=CODE_AGENT_CARD)
-        kwargs = {"api_key": settings.anthropic_api_key}
-        if settings.anthropic_base_url:
-            kwargs["base_url"] = settings.anthropic_base_url
-        self.client = AsyncAnthropic(**kwargs)
+        cfg = settings.client_for("code")
+        self.client = AsyncAnthropic(**cfg)
         self.model = settings.code_model
 
     async def execute(self, task: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         task_type = task.get("type", "backend")
         spec = task.get("spec", task)
         language = task.get("language", "python")
+
+        # 上传文件 markdown 注入 context，供 _generate_* 方法附加到 user prompt
+        context = {**context, "_files_hint": self._format_files_hint(task)}
 
         if task_type == "frontend":
             return await self._generate_frontend(spec, context)
@@ -170,10 +172,10 @@ class CodeAgent(BaseAgent):
                 model=self.model,
                 max_tokens=8192,
                 system=SYSTEM_PROMPTS["frontend"],
-                messages=[{"role": "user", "content": f"根据以下 UI 设计规范生成前端代码:\n\n{spec_str}"}],
+                messages=[{"role": "user", "content": f"根据以下 UI 设计规范生成前端代码:\n\n{spec_str}{context.get('_files_hint', '')}"}],
             )
             # 尝试解析 JSON 响应
-            content = resp.content[0].text
+            content = extract_text(resp.content)
             try:
                 result = json.loads(content)
             except json.JSONDecodeError:
@@ -203,9 +205,9 @@ class CodeAgent(BaseAgent):
                 model=self.model,
                 max_tokens=8192,
                 system=SYSTEM_PROMPTS["backend"],
-                messages=[{"role": "user", "content": f"根据以下规范生成后端 API 代码:\n\n{spec_str}"}],
+                messages=[{"role": "user", "content": f"根据以下规范生成后端 API 代码:\n\n{spec_str}{context.get('_files_hint', '')}"}],
             )
-            content = resp.content[0].text
+            content = extract_text(resp.content)
             try:
                 result = json.loads(content)
             except json.JSONDecodeError:
@@ -236,11 +238,11 @@ class CodeAgent(BaseAgent):
                 model=self.model,
                 max_tokens=4096,
                 system=f"你是一个资深 {language} 工程师。生成干净、类型安全、有错误处理的代码。只输出代码。",
-                messages=[{"role": "user", "content": spec_str}],
+                messages=[{"role": "user", "content": spec_str + context.get('_files_hint', '')}],
             )
             return {
                 "success": True,
-                "code": resp.content[0].text,
+                "code": extract_text(resp.content),
                 "tokens_used": resp.usage.input_tokens + resp.usage.output_tokens,
                 "model_used": self.model,
             }
@@ -256,9 +258,9 @@ class CodeAgent(BaseAgent):
                 model=self.model,
                 max_tokens=4096,
                 system=SVG_PROMPT,
-                messages=[{"role": "user", "content": f"请生成以下 SVG:\n\n{spec_str}"}],
+                messages=[{"role": "user", "content": f"请生成以下 SVG:\n\n{spec_str}{context.get('_files_hint', '')}"}],
             )
-            svg_code = resp.content[0].text.strip()
+            svg_code = extract_text(resp.content).strip()
             # 清理 markdown 代码块包装
             if svg_code.startswith("```"):
                 svg_code = svg_code.split("```")[1]
@@ -283,9 +285,9 @@ class CodeAgent(BaseAgent):
                 model=self.model,
                 max_tokens=4096,
                 system=OPENSCAD_PROMPT,
-                messages=[{"role": "user", "content": f"请生成以下 3D 模型的 OpenSCAD 代码:\n\n{spec_str}"}],
+                messages=[{"role": "user", "content": f"请生成以下 3D 模型的 OpenSCAD 代码:\n\n{spec_str}{context.get('_files_hint', '')}"}],
             )
-            code = resp.content[0].text.strip()
+            code = extract_text(resp.content).strip()
             if code.startswith("```"):
                 code = code.split("```")[1]
                 if code.startswith("openscad") or code.startswith("scad"):
@@ -309,9 +311,9 @@ class CodeAgent(BaseAgent):
                 model=self.model,
                 max_tokens=8192,
                 system=WEB_HTML_PROMPT,
-                messages=[{"role": "user", "content": f"请生成以下 HTML 页面:\n\n{spec_str}"}],
+                messages=[{"role": "user", "content": f"请生成以下 HTML 页面:\n\n{spec_str}{context.get('_files_hint', '')}"}],
             )
-            html = resp.content[0].text.strip()
+            html = extract_text(resp.content).strip()
             if html.startswith("```"):
                 html = html.split("```")[1]
                 if html.startswith("html"):

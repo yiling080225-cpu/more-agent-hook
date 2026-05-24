@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from ..config import settings
 from ..api.schemas import AgentCard
 from .base import BaseAgent
+from ..utils._content import extract_text
 
 logger = structlog.get_logger()
 
@@ -41,24 +42,22 @@ class MultimodalAgent(BaseAgent):
         self._anthropic_client = None
         self.model = settings.multimodal_model
 
-        # 初始化 Gemini 客户端
-        if settings.gemini_api_key:
+        # 初始化 Gemini 客户端 (可选)
+        if settings.gemini_key:
             try:
                 from google import genai
-                self._gemini_client = genai.Client(api_key=settings.gemini_api_key)
+                self._gemini_client = genai.Client(api_key=settings.gemini_key)
                 logger.info("multimodal_using_gemini")
             except ImportError:
                 logger.warning("google_genai_not_installed")
 
-        # 初始化 Anthropic 客户端 (含 DeepSeek 兼容端点)
-        if settings.anthropic_api_key and not self._gemini_client:
+        # 初始化 Anthropic 客户端
+        if not self._gemini_client:
             try:
                 from anthropic import AsyncAnthropic
-                kwargs = {"api_key": settings.anthropic_api_key}
-                if settings.anthropic_base_url:
-                    kwargs["base_url"] = settings.anthropic_base_url
-                self._anthropic_client = AsyncAnthropic(**kwargs)
-                logger.info("multimodal_using_anthropic_fallback")
+                cfg = settings.client_for("multimodal")
+                self._anthropic_client = AsyncAnthropic(**cfg)
+                logger.info("multimodal_using_anthropic")
             except ImportError:
                 logger.warning("anthropic_not_installed")
 
@@ -138,11 +137,31 @@ class MultimodalAgent(BaseAgent):
                 max_tokens=4096,
                 messages=[{"role": "user", "content": content}],
             )
-            raw = resp.content[0].text
+            raw = extract_text(resp.content)
+            clean = raw.strip()
+
+            # Clean any markdown code block wrapping
+            if clean.startswith("```"):
+                lines = clean.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip().startswith("```"):
+                    lines = lines[:-1]
+                clean = "\n".join(lines).strip()
+
+            # Try standard JSON parse
             try:
-                result = json.loads(raw)
-            except json.JSONDecodeError:
-                result = self._fallback_ui_spec(text)
+                result = json.loads(clean)
+            except (json.JSONDecodeError, ValueError):
+                # Try to repair: extract content by key (handles unescaped quotes in HTML/SVG)
+                result = self._extract_structured_content(clean, text)
+                if result is None:
+                    # DeepSeek may output raw HTML instead of JSON {html: ...}
+                    if clean.startswith("<") or "<!DOCTYPE" in clean[:50]:
+                        result = {"html": clean, "description": "Generated HTML page"}
+                    else:
+                        logger.warning("multimodal_parse_failed", raw_preview=raw[:200])
+                        result = self._fallback_ui_spec(text)
 
             return {
                 "success": True,
@@ -166,42 +185,18 @@ class MultimodalAgent(BaseAgent):
         output_format = task.get("output_format", "")
 
         if style:
-            style_map = {
-                "modern": "现代风格：圆角卡片、渐变、微阴影（Material Design 风格）",
-                "minimal": "极简风格：大量留白、细线条、无阴影、克制用色",
-                "glassmorphism": "毛玻璃风格：半透明面板、backdrop-filter 模糊、层次感",
-                "dark": "暗夜风格：深色背景 (#121212)、低亮度荧光色、高对比",
-                "brutalist": "粗野主义：粗黑边框、撞色、Raw 原始风格、大字体",
-                "cyberpunk": "赛博朋克：霓虹灯效、深紫/青绿配色、故障风",
-                "neumorphism": "新拟态：柔和浮雕、单色系、内阴影、低对比",
-                "classic": "经典风格：衬线字体、传统布局、稳重配色",
-                "retro": "复古风格：像素字体、高饱和、80-90 年代风格",
-                "organic": "自然风格：圆润形状、大地色系、柔和过渡",
-                "luxury": "奢华风格：金色点缀、衬线体、暗色质感",
-                "playful": "活泼风格：鲜艳色彩、弹跳动画、卡通元素",
-            }
-            style_hint += f"\n设计风格要求: {style_map.get(style, style)}\n"
+            style_hint += f"\n设计风格要求: {style}\n"
 
         if theme:
-            theme_map = {
-                "ocean": "主色调 #2563EB 海洋蓝",
-                "forest": "主色调 #16A34A 森林绿",
-                "sunset": "主色调 #EA580C 日落橙",
-                "rose": "主色调 #E11D48 玫瑰红",
-                "lavender": "主色调 #7C3AED 薰衣草紫",
-                "midnight": "主色调 #1E293B 午夜蓝黑",
-                "teal": "主色调 #0D9488 青碧",
-                "amber": "主色调 #D97706 琥珀金",
-                "slate": "主色调 #64748B 石板灰",
-            }
             if theme.startswith("#"):
                 style_hint += f"自定义主色调: {theme}\n"
             else:
-                style_hint += f"{theme_map.get(theme, f'主色调: {theme}')}\n"
+                style_hint += f"主色调: {theme}\n"
 
         if output_format and output_format != "both":
-            fmt_map = {"html": "输出纯 HTML+CSS", "react": "输出 React 组件", "vue": "输出 Vue 组件", "flutter": "输出 Flutter 代码"}
-            style_hint += f"输出框架: {fmt_map.get(output_format, output_format)}\n"
+            style_hint += f"输出框架: {output_format}\n"
+
+        files_hint = self._format_files_hint(task)
 
         prompts = {
             "ui_design": f"""你是一个资深 UI/UX 设计师。根据用户的描述和图片，生成一份完整的 UI 设计规范 (纯 JSON 格式，不要 markdown 代码块)。
@@ -263,28 +258,115 @@ class MultimodalAgent(BaseAgent):
 
 用户需求: {text}""",
 
-            "cad_from_sketch": f"""你是一个 CAD/机械工程师。用户提供了一张草图/图片，请分析它并生成 OpenSCAD 3D 模型代码。
+            "cad_from_sketch": f"""你是一个 CAD/机械工程师。用户提供了一张草图/图片，请分析它并生成参数化的 3D 模型代码。
 
 分析步骤:
 1. 识别草图中的形状 (圆柱、立方体、孔洞、倒角等)
 2. 估算尺寸比例关系
-3. 生成参数化的 OpenSCAD 代码
+3. 生成 Python build123d 3D 模型代码
 
-OpenSCAD 语法要点:
-- cube([x, y, z]) 或 cube([x, y, z], center=true)
-- cylinder(h=10, r=5) 或 cylinder(h=10, r1=3, r2=5)
-- difference() {{ 主体; 切除部分; }}
-- union() {{ 部件1; 部件2; }}
-- translate([x, y, z]) / rotate([x, y, z])
-- sphere(r=10)
-- linear_extrude(height=10) + 2D 图形
+build123d 语法要点 (基于 CadQuery/OCP):
+```python
+from build123d import *
+# 基本形状
+box = Box(length, width, height)
+cylinder = Cylinder(radius, height)
+sphere = Sphere(radius)
+cone = Cone(bottom_radius, top_radius, height)
+
+# 布尔运算
+body = box - cylinder  # 差集
+body = box + cylinder  # 并集
+body = box & cylinder  # 交集
+
+# 位置变换
+body = Pos(x, y, z) * body
+body = Rot(X=90) * body
+
+# 边操作: fillet, chamfer
+body = fillet(body.edges(), radius)
+
+# 草图拉伸
+with BuildSketch() as sk:
+    Rectangle(width, height)
+body = extrude(sk, amount)
+
+# 导出
+from build123d import export_step, export_stl
+export_step(body, "output.step")
+export_stl(body, "output.stl")
+```
 
 返回纯 JSON:
 {{
     "analysis": "对草图的描述分析 (形状/尺寸/结构)",
     "estimated_dimensions": {{"unit": "mm", "width": N, "height": N, "depth": N}},
-    "openscad_code": "完整的参数化 OpenSCAD 代码 (含变量定义和注释)",
-    "render_hint": "建议的渲染参数 (如 $fn=50)"
+    "build123d_code": "完整的参数化 build123d Python 代码 (含变量定义、注释和导出语句)",
+    "design_notes": "关键设计决策说明"
+}}
+
+用户需求: {text}""",
+
+            "build123d_model": f"""你是一个机械 CAD 工程师，精通 build123d (基于 CadQuery/OCP) 参数化建模。
+根据用户需求，生成完整的 build123d Python 代码来创建 3D 模型。
+
+{style_hint}
+
+建模规范:
+- 单位: 毫米 (mm)
+- 原点: 零件中心或装配体基准面
+- 基面: XY 平面，拉伸方向为 +Z
+- 输出: 封闭的实体 (solid)，正体积
+- 壁厚 (未指定时): 2.0-3.0 mm
+- 倒角半径 (装饰性): 1.0-3.0 mm
+- M3/M4/M5 通孔: 3.4/4.5/5.5 mm
+
+build123d 代码结构:
+```python
+from build123d import *
+from math import pi, sin, cos, tan, sqrt
+
+# === 参数定义 ===
+length = 100.0
+width = 60.0
+height = 25.0
+wall_thickness = 2.5
+fillet_radius = 2.0
+
+# === 主体建模 ===
+body = Box(length, width, height)
+
+# === 特征 (孔洞、倒角等) ===
+hole = Cylinder(radius=3.4, height=wall_thickness * 2)
+body -= Pos(length/2 - 10, width/2 - 10, 0) * hole
+body = fillet(body.edges(), radius=fillet_radius)
+
+# === 导出 ===
+export_step(body, "part_name.step")
+export_stl(body, "part_name.stl")
+```
+
+返回纯 JSON:
+{{
+    "build123d_code": "完整的、可直接运行的 build123d Python 代码 (含参数定义、建模、导出)",
+    "parameters": {{"unit": "mm"}},
+    "features": ["使用的建模特征列表 (Box, Cylinder, fillet, extrude 等)"],
+    "expected_outputs": ["part_name.step", "part_name.stl"],
+    "design_notes": "设计决策和假设说明"
+}}
+
+用户需求: {text}""",
+
+            "cad_model": f"""你是一个机械 CAD 工程师。根据用户需求，生成参数化的 3D 模型代码。
+
+{style_hint}
+
+返回纯 JSON:
+{{
+    "build123d_code": "完整的参数化 build123d Python 代码 (含参数定义、注释和导出语句)",
+    "parameters": {{"unit": "mm"}},
+    "features": ["使用的建模特征列表"],
+    "design_notes": "关键设计决策说明"
 }}
 
 用户需求: {text}""",
@@ -293,7 +375,7 @@ OpenSCAD 语法要点:
 
             "content_extraction": "提取图片中的所有文字和结构化信息，返回纯 JSON。用户补充: " + text,
         }
-        return prompts.get(task_type, prompts["ui_design"])
+        return prompts.get(task_type, prompts["ui_design"]) + files_hint
 
     def _load_image(self, img: str):
         """加载图片为 Gemini 格式"""
@@ -330,6 +412,42 @@ OpenSCAD 语法要点:
                     return base64.b64encode(f.read()).decode()
             except Exception:
                 return None
+
+    def _extract_structured_content(self, text: str, user_text: str) -> Optional[Dict[str, Any]]:
+        """从格式不佳的 JSON 中提取结构化内容 (处理 LLM 未正确转义 HTML/SVG 引号的情况)"""
+        import re
+
+        result: Dict[str, Any] = {}
+
+        # 提取 html 块: "html": "..." 或 "html": " 之后的 <!DOCTYPE 到结束
+        html_match = re.search(r'"html"\s*:\s*"(?P<html><!DOCTYPE[\s\S]+?)(?="\s*[,}]|\Z)', text)
+        if not html_match:
+            html_match = re.search(r'"html"\s*:\s*"(?P<html><html[\s\S]+?</html>)', text, re.IGNORECASE)
+        if not html_match:
+            # raw HTML from opening < to closing </html> (not JSON-wrapped)
+            html_match = re.search(r'(?P<html><!DOCTYPE[\s\S]+?</html>)', text, re.IGNORECASE)
+        if html_match:
+            result["html"] = html_match.group("html")
+            result.setdefault("description", "")
+
+        # 提取 svg 块
+        svg_match = re.search(r'"svg"\s*:\s*"(?P<svg><svg[\s\S]+?</svg>)', text, re.IGNORECASE)
+        if svg_match:
+            result["svg"] = svg_match.group("svg")
+            result.setdefault("description", "SVG diagram")
+
+        # 提取 build123d_code 块
+        code_match = re.search(r'"build123d_code"\s*:\s*"(?P<code>from build123d[\s\S]+?)(?="\s*[,}]|\Z)', text)
+        if not code_match:
+            code_match = re.search(r'"build123d_code"\s*:\s*"(?P<code>[\s\S]{200,}?)(?="\s*[,}]|\Z)', text)
+        if code_match:
+            result["build123d_code"] = code_match.group("code")
+            result.setdefault("parameters", {"unit": "mm"})
+
+        if result:
+            logger.info("multimodal_extracted", keys=list(result.keys()))
+            return result
+        return None
 
     def _fallback_result(self, text: str) -> Dict[str, Any]:
         return {

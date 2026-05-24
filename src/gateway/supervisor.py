@@ -21,6 +21,7 @@ from ..api.schemas import (
 )
 from .registry import agent_registry
 from .a2a_client import a2a_client
+from ..utils._content import extract_text
 
 logger = structlog.get_logger()
 
@@ -40,6 +41,7 @@ ROUTING_PROMPT = """你是一个多模态 Agent 联邦的任务路由器。根�
 5. 简单问答/说明类请求: 直接回答，不需要委托 Agent
 
 用户偏好（如提供）包含设计风格、主题色、输出框架等，应传递给对应 Agent。
+若用户上传了文件，将以 [文件内容摘要]...[/文件内容摘要] 形式给出前 1500 字 — 这通常是判断真实意图的关键依据，请优先采信文件内容而非模糊的用户文字。
 
 返回 JSON:
 {
@@ -47,7 +49,7 @@ ROUTING_PROMPT = """你是一个多模态 Agent 联邦的任务路由器。根�
     "reason": "选择理由",
     "is_multi_stage": true/false,
     "extracted_requirements": "摘要",
-    "task_type": "视觉分析/代码生成/代码审查/多阶段工作流/直接回答"
+    "task_type": "web_page/svg_diagram/cad_from_sketch/cad_model/ui_design/代码生成/代码审查/多阶段工作流/直接回答"
 }"""
 
 
@@ -59,22 +61,20 @@ class FederationSupervisor:
         self.router_anthropic = None
         self.router_model = settings.router_model
 
-        # 优先 Gemini
-        if settings.gemini_api_key and HAS_GENAI:
+        # 优先 Gemini (需翻墙)
+        if settings.gemini_key and HAS_GENAI:
             try:
-                self.router_client = genai.Client(api_key=settings.gemini_api_key)
+                self.router_client = genai.Client(api_key=settings.gemini_key)
                 logger.info("supervisor_router_using_gemini")
             except Exception:
                 pass
 
-        # 无 Gemini 时用 Anthropic/DeepSeek
-        if not self.router_client and settings.anthropic_api_key:
+        # 用 DeepSeek / clawsocket
+        if not self.router_client:
             try:
                 from anthropic import AsyncAnthropic
-                kwargs = {"api_key": settings.anthropic_api_key}
-                if settings.anthropic_base_url:
-                    kwargs["base_url"] = settings.anthropic_base_url
-                self.router_anthropic = AsyncAnthropic(**kwargs)
+                cfg = settings.client_for("router")
+                self.router_anthropic = AsyncAnthropic(**cfg)
                 logger.info("supervisor_router_using_anthropic")
             except Exception:
                 pass
@@ -96,8 +96,14 @@ class FederationSupervisor:
         import uuid
         thread_id = user_input.context.get("thread_id") or str(uuid.uuid4())
 
-        # 1. 智能路由
-        routing = await self._route_task(user_input)
+        # 0. 上传文件先转 Markdown (路由 + Agent 共用一份, 避免重复解析)
+        files_markdown = ""
+        if user_input.files:
+            from ..utils.file_extraction import extract_files_to_markdown
+            files_markdown = extract_files_to_markdown(user_input.files)
+
+        # 1. 智能路由 (含文件摘要)
+        routing = await self._route_task(user_input, files_markdown=files_markdown)
 
         # 2. 如果不需要 Agent (直接问答)
         if routing["agent"] is None:
@@ -124,17 +130,21 @@ class FederationSupervisor:
                 "requires_human_review": False,
             }
 
-        # 构建任务 (context 中的 style/theme/output_format/sandbox/allow_search 自动传入)
+        # 构建任务 (context 中的 style/theme/output_format 自动传入)
+        # files_markdown 已在路由前提取, 直接复用
+
         task = {
             "text": user_input.text,
             "images": user_input.images,
             "videos": user_input.videos,
             "audio": user_input.audio,
             "files": user_input.files,
+            "files_markdown": files_markdown,
             "task_type": routing.get("task_type", ""),
             "extracted_requirements": routing.get("extracted_requirements", ""),
             "thread_id": thread_id,
-            **user_input.context,
+            **{k: v for k, v in user_input.context.items()
+               if k not in ("sandbox", "allow_search")},
         }
 
         # 4. 发送 A2A 请求
@@ -161,8 +171,8 @@ class FederationSupervisor:
             "preview_path": preview_path,
         }
 
-    async def _route_task(self, user_input: UserInput) -> Dict[str, Any]:
-        """使用 LLM 智能路由 (优先 Gemini，回退 Anthropic/DeepSeek)"""
+    async def _route_task(self, user_input: UserInput, files_markdown: str = "") -> Dict[str, Any]:
+        """路由任务：产出型请求 (网页/图表/CAD) 关键词优先，其余走 LLM。"""
         has_multimodal = bool(
             user_input.images or user_input.videos or user_input.audio or user_input.files
         )
@@ -176,21 +186,29 @@ class FederationSupervisor:
             extra_parts.append(f"[偏好主题: {ctx['theme']}]")
         if ctx.get("output_format"):
             extra_parts.append(f"[输出框架: {ctx['output_format']}]")
+        # 文件转 Markdown 摘要喂给路由 LLM, 帮助判断真实意图
+        if files_markdown:
+            snippet = files_markdown[:1500].strip()
+            extra_parts.append(f"[文件内容摘要]\n{snippet}\n[/文件内容摘要]")
         extra = " " + " ".join(extra_parts) if extra_parts else ""
+
+        # 策略 0: 产出型请求关键词优先 (绕过 LLM 避免误判)
+        kw = self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
+        if kw.get("task_type") in ("web_page", "svg_diagram", "cad_model", "cad_from_sketch", "build123d_model"):
+            return kw
 
         # 策略 1: Gemini 路由
         if self.router_client:
-            return await self._route_via_gemini(user_input, extra, has_multimodal)
+            return await self._route_via_gemini(user_input, extra, has_multimodal, files_markdown=files_markdown)
 
         # 策略 2: Anthropic/DeepSeek 路由
         if self.router_anthropic:
-            return await self._route_via_anthropic(user_input, extra, has_multimodal)
+            return await self._route_via_anthropic(user_input, extra, has_multimodal, files_markdown=files_markdown)
 
         # 策略 3: 关键词降级
-        logger.warning("no_routing_llm_available")
-        return self._keyword_routing(user_input, has_multimodal)
+        return kw
 
-    async def _route_via_gemini(self, user_input: UserInput, extra: str, has_multimodal: bool) -> Dict[str, Any]:
+    async def _route_via_gemini(self, user_input: UserInput, extra: str, has_multimodal: bool, files_markdown: str = "") -> Dict[str, Any]:
         try:
             resp = self.router_client.models.generate_content(
                 model=self.router_model,
@@ -208,9 +226,9 @@ class FederationSupervisor:
             return routing
         except Exception as e:
             logger.warning("gemini_routing_failed", error=str(e))
-            return self._keyword_routing(user_input, has_multimodal)
+            return self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
 
-    async def _route_via_anthropic(self, user_input: UserInput, extra: str, has_multimodal: bool) -> Dict[str, Any]:
+    async def _route_via_anthropic(self, user_input: UserInput, extra: str, has_multimodal: bool, files_markdown: str = "") -> Dict[str, Any]:
         try:
             resp = await self.router_anthropic.messages.create(
                 model=self.router_model,
@@ -218,7 +236,7 @@ class FederationSupervisor:
                 messages=[{"role": "user", "content": f"{ROUTING_PROMPT}\n\n用户输入: {user_input.text}{extra}"}],
             )
             import json
-            text = resp.content[0].text
+            text = extract_text(resp.content)
             # Try to extract JSON
             try:
                 routing = json.loads(text)
@@ -231,11 +249,17 @@ class FederationSupervisor:
             return routing
         except Exception as e:
             logger.warning("anthropic_routing_failed", error=str(e))
-            return self._keyword_routing(user_input, has_multimodal)
+            return self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
 
-    def _keyword_routing(self, user_input: UserInput, has_multimodal: bool) -> Dict[str, Any]:
+    def _keyword_routing(self, user_input: UserInput, has_multimodal: bool, files_markdown: str = "") -> Dict[str, Any]:
         """降级路由: 关键词匹配 (含产出类型检测)"""
         text = user_input.text
+        text_lower = text.lower()
+        # 文件摘要也参与关键词扫描 (用户只说"看看这个"时, 凭文件内容判断意图)
+        file_snippet = (files_markdown[:2000] if files_markdown else "")
+        file_snippet_lower = file_snippet.lower()
+        combined = text + "\n" + file_snippet
+        combined_lower = text_lower + "\n" + file_snippet_lower
 
         # 产出类型检测
         web_keywords = ["网页", "页面", "网站", "html", "前端页面", "生成页面", "做个页面", "写个页面",
@@ -243,35 +267,41 @@ class FederationSupervisor:
         diagram_keywords = ["画图", "画个图", "流程图", "svg", "图表", "架构图", "示意图", "思维导图",
                             "draw", "diagram", "flowchart", "chart", "图形", "可视化"]
         cad_keywords = ["cad", "3d", "三维", "模型", "建模", "零件", "齿轮", "机械", "打印",
-                        "openscad", "stl", "step", "草图", "草稿", "工程图"]
+                        "openscad", "stl", "step", "草图", "草稿", "工程图",
+                        "设计", "支架", "外壳", "壳体", "底座", "法兰",
+                        "手机架", "手机壳", "轴", "弹簧", "凸轮", "连杆"]
+        build123d_keywords = ["build123d", "step文件", "step 文件", "stp", "制造",
+                             "cnc", "数控", "装配", "装配体", "螺栓", "轴承", "齿轮箱"]
         review_keywords = ["审查", "review", "检查", "安全", "漏洞", "评审"]
         code_keywords = ["代码", "开发", "实现", "API", "接口", "写个", "生成", "build", "create", "implement"]
         workflow_keywords = ["部署", "deploy", "工作流", "workflow", "流程", "全栈", "从零", "项目"]
 
-        # 产出类型优先匹配
-        if has_multimodal and any(kw in text for kw in cad_keywords):
-            return {"agent": "multimodal_design_agent", "reason": "CAD 建模需求 (含图片参考)",
+        # 产出类型优先匹配 (text + 文件摘要 都参与, 用户带文件来时常省略关键词)
+        if has_multimodal and any(kw in combined for kw in cad_keywords):
+            return {"agent": "multimodal_design_agent", "reason": "CAD 建模需求 (含图片/文件参考)",
                     "is_multi_stage": False, "task_type": "cad_from_sketch"}
+        if any(kw in combined for kw in web_keywords):
+            return {"agent": "multimodal_design_agent", "reason": "网页生成需求",
+                    "is_multi_stage": False, "task_type": "web_page"}
+        elif any(kw in combined for kw in diagram_keywords):
+            return {"agent": "multimodal_design_agent", "reason": "图表/SVG 生成需求",
+                    "is_multi_stage": False, "task_type": "svg_diagram"}
+        elif any(kw in combined_lower for kw in build123d_keywords):
+            return {"agent": "multimodal_design_agent", "reason": "build123d 精确建模需求",
+                    "is_multi_stage": False, "task_type": "build123d_model"}
+        elif any(kw in combined for kw in cad_keywords):
+            return {"agent": "multimodal_design_agent", "reason": "CAD 建模需求",
+                    "is_multi_stage": False, "task_type": "cad_model"}
         elif has_multimodal:
             return {"agent": "multimodal_design_agent", "reason": "包含多模态输入",
                     "is_multi_stage": False, "task_type": "多模态分析"}
-
-        if any(kw in text for kw in web_keywords):
-            return {"agent": "multimodal_design_agent", "reason": "网页生成需求",
-                    "is_multi_stage": False, "task_type": "web_page"}
-        elif any(kw in text for kw in diagram_keywords):
-            return {"agent": "multimodal_design_agent", "reason": "图表/SVG 生成需求",
-                    "is_multi_stage": False, "task_type": "svg_diagram"}
-        elif any(kw in text for kw in cad_keywords):
-            return {"agent": "multimodal_design_agent", "reason": "CAD 建模需求",
-                    "is_multi_stage": False, "task_type": "cad_model"}
-        elif any(kw in text for kw in workflow_keywords):
+        elif any(kw in combined for kw in workflow_keywords):
             return {"agent": "workflow_orchestrator", "reason": "多阶段工作流",
                     "is_multi_stage": True, "task_type": "多阶段工作流"}
-        elif any(kw in text for kw in review_keywords):
+        elif any(kw in combined for kw in review_keywords):
             return {"agent": "code_review_agent", "reason": "代码审查需求",
                     "is_multi_stage": False, "task_type": "代码审查"}
-        elif any(kw in text for kw in code_keywords):
+        elif any(kw in combined for kw in code_keywords):
             return {"agent": "secure_code_agent", "reason": "代码生成需求",
                     "is_multi_stage": False, "task_type": "代码生成"}
         else:
@@ -292,8 +322,11 @@ class FederationSupervisor:
         file_map = {
             "web_page": ("html", content.get("html") if isinstance(content, dict) else None),
             "svg_diagram": ("svg", content.get("svg") if isinstance(content, dict) else None),
-            "cad_model": ("scad", content.get("openscad_code") if isinstance(content, dict) else None),
-            "cad_from_sketch": ("scad", content.get("openscad_code") if isinstance(content, dict) else None),
+            "cad_model": ("py", content.get("build123d_code") or content.get("openscad_code")
+                         if isinstance(content, dict) else None),
+            "cad_from_sketch": ("py", content.get("build123d_code") or content.get("openscad_code")
+                               if isinstance(content, dict) else None),
+            "build123d_model": ("py", content.get("build123d_code") if isinstance(content, dict) else None),
         }
 
         if task_type not in file_map:

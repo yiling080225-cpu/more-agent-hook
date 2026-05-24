@@ -24,9 +24,7 @@ env/
 !.env.example
 
 # Data
-data/*.db
-*.db-journal
-*.db-wal
+data/
 
 # OS
 .DS_Store
