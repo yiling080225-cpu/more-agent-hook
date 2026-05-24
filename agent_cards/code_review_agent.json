@@ -1,0 +1,22 @@
+{
+  "name": "code_review_agent",
+  "description": "对话式代码审查，多轮辩论，安全漏洞检测",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "code", "diff"],
+    "output": ["review_comment", "approval_status", "json"],
+    "skills": [
+      "code_review",
+      "security_vulnerability_detection",
+      "performance_analysis",
+      "multi_round_debate",
+      "best_practice_enforcement"
+    ]
+  },
+  "endpoint": "http://127.0.0.1:8003/a2a",
+  "mcp_servers": [],
+  "model": "deepseek-chat",
+  "max_context_tokens": 128000,
+  "max_review_rounds": 3,
+  "token_budget_per_review": 50000
+}
