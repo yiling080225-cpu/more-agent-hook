@@ -3,8 +3,6 @@
 import structlog
 from typing import Any, Dict
 
-from anthropic import AsyncAnthropic
-
 from ..config import settings
 from ..api.schemas import AgentCard
 from .base import BaseAgent
@@ -137,6 +135,7 @@ class CodeAgent(BaseAgent):
 
     def __init__(self):
         super().__init__(card=CODE_AGENT_CARD)
+        from anthropic import AsyncAnthropic
         cfg = settings.client_for("code")
         self.client = AsyncAnthropic(**cfg)
         self.model = settings.code_model

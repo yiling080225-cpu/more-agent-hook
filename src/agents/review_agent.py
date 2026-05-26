@@ -4,8 +4,6 @@ import json
 import structlog
 from typing import Any, Dict, List
 
-from anthropic import AsyncAnthropic
-
 from ..config import settings
 from ..api.schemas import AgentCard
 from .base import BaseAgent
@@ -73,6 +71,7 @@ class ReviewAgent(BaseAgent):
 
     def __init__(self):
         super().__init__(card=REVIEW_AGENT_CARD)
+        from anthropic import AsyncAnthropic
         cfg = settings.client_for("review")
         self.client = AsyncAnthropic(**cfg)
         self.model = settings.review_model

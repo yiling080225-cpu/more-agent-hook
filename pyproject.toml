@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multimodal-agent-federation"
+version = "1.0.0"
+description = "多模态 Agent 联邦 MVP — Agent Federation 本地可运行系统"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "anthropic>=0.40.0",
+    "google-genai>=1.0.0",
+    "Pillow>=10.0",
+    "rich>=13.0",
+    "questionary>=2.0",
+    "click>=8.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "httpx>=0.28.0",
+    "aiosqlite>=0.20.0",
+    "jinja2>=3.1.0",
+    "python-dotenv>=1.0.0",
+    "structlog>=24.0.0,<25.0.0",
+    "markitdown>=0.0.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[project.urls]
+Repository = "https://github.com/yiling080225-cpu/3agent-1.1"
+
+[tool.setuptools.packages.find]
+include = ["src*", "federation_sdk*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

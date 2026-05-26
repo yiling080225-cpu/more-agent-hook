@@ -83,13 +83,11 @@ class TestConfigSecurity:
     """测试配置安全"""
 
     def test_no_hardcoded_key(self):
-        from src.config import Settings, _load_claude_settings
-        auto = _load_claude_settings()
-        # API key 从文件读取，不应硬编码在源码中
-        assert isinstance(auto, dict)
-        if "anthropic_api_key" in auto:
-            # Key 应该是从外部文件加载的，不是硬编码
-            assert auto["anthropic_api_key"] != ""
+        from src.config import Settings
+        s = Settings()
+        # API key 从 .env / 环境变量读取，不应硬编码在源码中
+        # 未配置 .env 时 key 为空字符串
+        assert s.deepseek_key == "" or s.deepseek_key.startswith("sk-")
 
     def test_localhost_default(self):
         from src.config import settings

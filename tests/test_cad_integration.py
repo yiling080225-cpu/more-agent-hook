@@ -357,8 +357,6 @@ class TestNoRegression:
         assert isinstance(sv._active_workflows, dict)
 
     def test_config_has_claude_settings(self):
-        from src.config import _load_claude_settings, settings
-        result = _load_claude_settings()
-        assert isinstance(result, dict)
+        from src.config import settings
         assert isinstance(settings.has_anthropic, bool)
         assert isinstance(settings.anthropic_base_url, str)

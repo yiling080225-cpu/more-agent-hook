@@ -1,4 +1,4 @@
-"""配置管理: 从环境变量 (.env) 读取供应商 + Agent 模型分配"""
+"""配置管理: .env 文件 + 环境变量 + 启动时友好校验"""
 
 from pydantic_settings import BaseSettings
 
@@ -6,26 +6,23 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
-    # === 供应商 1: DeepSeek (Anthropic 兼容) ===
+    # === API Keys ===
     deepseek_key: str = ""
     deepseek_url: str = "https://api.deepseek.com/anthropic"
 
-    # === 供应商 2: 智谱 GLM (Anthropic 兼容, 视觉能力强) ===
     glm_key: str = ""
-    glm_url: str = ""
+    glm_url: str = "https://open.bigmodel.cn/api/paas/v4"
 
-    # === 供应商 3: clawsocket 聚合 (Anthropic 兼容, 含 Claude + GPT) ===
     clawsocket_key: str = ""
     clawsocket_url: str = ""
 
-    # === Gemini (独立, 需翻墙) ===
     gemini_key: str = ""
 
     # === 模型分配 ===
-    router_model: str = "claude-sonnet-4-6"
-    multimodal_model: str = "claude-sonnet-4-6"
-    code_model: str = "claude-sonnet-4-6"
-    review_model: str = "claude-haiku-4-5"
+    router_model: str = "deepseek-chat"
+    multimodal_model: str = "deepseek-chat"
+    code_model: str = "deepseek-chat"
+    review_model: str = "deepseek-chat"
 
     # === 服务 ===
     host: str = "127.0.0.1"
@@ -38,6 +35,10 @@ class Settings(BaseSettings):
     multimodal_agent_port: int = 8001
     code_agent_port: int = 8002
     review_agent_port: int = 8003
+
+    @property
+    def has_any_api_key(self) -> bool:
+        return bool(self.deepseek_key or self.glm_key or self.clawsocket_key or self.gemini_key)
 
     @property
     def has_anthropic(self) -> bool:
@@ -54,7 +55,9 @@ class Settings(BaseSettings):
     def client_for(self, agent: str) -> dict:
         """返回 {api_key, base_url} 给对应 Agent"""
         if agent == "multimodal":
-            return {"api_key": self.glm_key, "base_url": self.glm_url}
+            if self.glm_key:
+                return {"api_key": self.glm_key, "base_url": self.glm_url}
+            return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
         return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
 
     # === URL 快捷属性 ===
@@ -73,15 +76,6 @@ class Settings(BaseSettings):
     @property
     def gateway_url(self) -> str:
         return f"http://{self.host}:{self.gateway_port}"
-
-
-def _load_claude_settings() -> dict:
-    """从环境变量加载 Claude 设置 (兼容旧接口)"""
-    return {
-        "anthropic_api_key": settings.clawsocket_key,
-        "anthropic_base_url": settings.clawsocket_url,
-        "claude_default_model": settings.code_model,
-    }
 
 
 settings = Settings()

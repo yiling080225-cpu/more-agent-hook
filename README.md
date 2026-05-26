@@ -2,8 +2,7 @@
 
 > **哪个 Agent 能力强就用哪个** — 本地可运行的 Agent Federation 最小可行产品
 
-基于 [原始架构方案](../multimodal_agent_federation/README.md) 的完整可运行实现。
-原始方案需要 GCP + 12 周，本 MVP 压缩为**零云依赖、3 个核心 Agent、本地一键启动**。
+3 个协作 AI Agent（多模态设计 / 安全代码生成 / 代码审查）通过 Gateway 统一调度，支持 LangGraph 工作流编排、A2A 协议通信、MCP 工具集成。
 
 ---
 
@@ -11,23 +10,37 @@
 
 ```bash
 # 1. 安装依赖
-pip install -r requirements.txt
+pip install -e .
 
-# 2. 启动全部服务 (Gateway + 3 Agent)
+# 2. 配置 API Key
+cp .env.example .env
+# 编辑 .env，至少填入 DEEPSEEK_KEY
+# 免费获取: https://platform.deepseek.com/api_keys
+
+# 3. 校验配置
+python validate_setup.py
+
+# 4. 启动全部服务 (Gateway + 3 Agent)
 python run.py
 
-# 3. 浏览器打开 Dashboard
+# 5. 浏览器打开 Dashboard
 # http://127.0.0.1:8000/dashboard
 ```
 
-**API Key 自动配置**: 代码会自动从 `~/.claude/settings.json` (CC Switch 配置文件) 读取 DeepSeek API Key，无需手动设置 `.env` 文件。
+### 支持的 API 供应商
+
+| 供应商 | 环境变量 | 获取地址 |
+|--------|---------|---------|
+| DeepSeek (推荐) | `DEEPSEEK_KEY` | platform.deepseek.com |
+| 智谱 GLM | `GLM_KEY` | open.bigmodel.cn |
+| Gemini | `GEMINI_KEY` | aistudio.google.com |
 
 ---
 
 ## 架构概览
 
 ```
-用户输入 (Dashboard / API)
+用户输入 (Dashboard / API / CLI)
         |
 [Gateway :8000] — 总调度 + A2A 路由 + 工作流控制
    |         |         |
@@ -43,11 +56,13 @@ LangGraph 工作流:
 
 ## 3 个核心 Agent
 
-| Agent | 端口 | 能力 | 模型 |
+| Agent | 端口 | 能力 | 默认模型 |
 |-------|------|------|------|
-| **Multimodal** | 8001 | 图像理解、UI 设计规范生成 | DeepSeek V4 (带视觉) |
-| **Code** | 8002 | 前端/后端代码生成、API 设计 | DeepSeek V4 |
-| **Review** | 8003 | 多轮代码审查、安全漏洞检测 | DeepSeek V4 |
+| **Multimodal** | 8001 | 图像理解、UI 设计规范生成、网页/SVG/CAD 产出 | deepseek-chat |
+| **Code** | 8002 | 前端/后端代码生成、API 设计 | deepseek-chat |
+| **Review** | 8003 | 多轮代码审查、安全漏洞检测 | deepseek-chat |
+
+所有模型可通过 `.env` 文件中的 `*_MODEL` 变量自由替换。
 
 ## API 文档
 
@@ -61,9 +76,6 @@ curl http://127.0.0.1:8000/health
 
 # 列出所有 Agent
 curl http://127.0.0.1:8000/agents
-
-# Agent 健康检查
-curl -X POST http://127.0.0.1:8000/agents/health-check
 
 # 智能路由分析 (不执行)
 curl -X POST http://127.0.0.1:8000/supervisor/route \
@@ -79,9 +91,21 @@ curl -X POST http://127.0.0.1:8000/supervisor/execute \
 curl -X POST http://127.0.0.1:8000/workflow/start \
   -H "Content-Type: application/json" \
   -d '{"input": {"text": "做一个电商网站，需要商品展示和购物车"}}'
+```
 
-# 查看 MCP 工具
-curl http://127.0.0.1:8000/mcp/tools
+---
+
+## CLI 客户端
+
+```bash
+# 对话模式
+python fedcli.py
+
+# 命令行模式
+python fedcli.py system              # 系统状态
+python fedcli.py estimate "做个登录页"  # 预估费用
+python fedcli.py new "做个登录页"       # 提交任务
+python fedcli.py status               # 查看任务列表
 ```
 
 ---
@@ -89,36 +113,24 @@ curl http://127.0.0.1:8000/mcp/tools
 ## 项目结构
 
 ```
-multimodal_agent_federation_mvp/
 ├── run.py                          # 统一启动入口
+├── fedcli.py / fedcli_gui.py       # CLI / GUI 客户端
+├── pyproject.toml                   # 项目配置 (pip install -e .)
 ├── requirements.txt                # Python 依赖
 ├── Dockerfile / docker-compose.yml # 容器化部署
-├── .env / .env.example             # 环境配置
+├── .env.example                    # 环境配置模板
 ├── mcp_config.yaml                 # MCP 工具配置
-├── agent_cards/                    # 9 个 Agent Card (JSON)
+├── agent_cards/                    # 3 个 Agent Card (JSON)
 ├── src/
-│   ├── config.py                   # 配置管理 (自动读 cc-switch)
-│   ├── api/
-│   │   ├── routes.py               # FastAPI 路由 (A2A + 管理 API)
-│   │   └── schemas.py              # Pydantic 数据模型
-│   ├── agents/
-│   │   ├── base.py                 # Agent 基类 (A2A 协议)
-│   │   ├── multimodal_agent.py     # 多模态 Agent
-│   │   ├── code_agent.py           # 代码生成 Agent
-│   │   └── review_agent.py         # 代码审查 Agent
-│   ├── gateway/
-│   │   ├── supervisor.py           # 总调度器 (LLM 智能路由)
-│   │   ├── registry.py             # Agent Card 注册中心
-│   │   └── a2a_client.py           # A2A HTTP 客户端
-│   ├── workflow/
-│   │   ├── ecommerce_workflow.py   # LangGraph 端到端工作流
-│   │   └── checkpoint.py           # SQLite Checkpoint 持久化
-│   ├── mcp/
-│   │   ├── registry.py             # MCP 工具注册中心
-│   │   └── tools/                  # 内置工具 (文件/搜索/代码)
-│   └── ui/
-│       └── dashboard.html          # 监控面板
-└── tests/                          # 38 个测试用例
+│   ├── config.py                   # 配置管理
+│   ├── api/       (routes, schemas)
+│   ├── agents/    (base, multimodal, code, review)
+│   ├── gateway/   (supervisor, registry, a2a_client)
+│   ├── workflow/  (ecommerce_workflow, checkpoint)
+│   ├── mcp/       (registry, tools/)
+│   └── ui/        (dashboard.html)
+├── federation_sdk/                 # Python SDK
+└── tests/                          # 测试用例
 ```
 
 ## MVP 简化说明
@@ -130,22 +142,30 @@ multimodal_agent_federation_mvp/
 | Cloud Run / GKE | 单进程 asyncio |
 | 11 个外部 MCP Server | 6 个内置工具 |
 | A2A gRPC + HTTP | HTTP REST A2A |
-| Gemini + Claude + GPT | DeepSeek V4 (Anthropic 兼容) |
+| Gemini + Claude + GPT | DeepSeek (Anthropic 兼容) |
 
 ## 运行测试
 
 ```bash
+pip install -e ".[test]"
 pytest tests/ -v
-# 38 passed
 ```
 
 ## 部署 (Docker)
 
 ```bash
+cp .env.example .env
+# 编辑 .env 填入 API Key
 docker-compose up -d
 # Dashboard: http://localhost:8000/dashboard
 ```
 
+## 环境要求
+
+- Python 3.11+
+- DeepSeek API Key（或其他 Anthropic 兼容供应商）
+- 可选：Gemini API Key（多模态理解）、GLM API Key（视觉能力）
+
 ---
 
-**版本**: 1.0.0-mvp | **日期**: 2026-05-14
+**版本**: 1.0.0-mvp | **许可**: MIT

@@ -9,6 +9,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制代码
 COPY . .
 
+# 从 .env.example 创建默认 .env (如果用户未提供)
+RUN if [ ! -f .env ]; then cp .env.example .env; fi
+
 # 创建数据目录
 RUN mkdir -p data
 

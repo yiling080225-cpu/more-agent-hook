@@ -13,7 +13,7 @@ langgraph-checkpoint-sqlite>=2.0.0
 google-genai>=1.0.0
 anthropic>=0.40.0
 
-# SDK & CLI (新增依赖)
+# SDK & CLI
 Pillow>=10.0
 rich>=13.0
 questionary>=2.0
@@ -35,6 +35,9 @@ jinja2>=3.1.0
 # Utilities
 python-dotenv>=1.0.0
 structlog>=24.0.0,<25.0.0
+
+# File conversion (PDF/DOCX/XLSX → Markdown)
+markitdown>=0.0.1
 
 # Testing
 pytest>=8.0.0

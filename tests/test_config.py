@@ -1,20 +1,7 @@
-"""测试配置管理 (环境变量 + cc-switch 自动读取)"""
+"""测试配置管理"""
 
 import pytest
-from src.config import Settings, settings, _load_claude_settings
-
-
-class TestAutoLoadClaudeSettings:
-    def test_returns_dict(self):
-        result = _load_claude_settings()
-        assert isinstance(result, dict)
-
-    def test_has_expected_keys(self):
-        result = _load_claude_settings()
-        # Keys may be present or absent depending on cc-switch state
-        valid_keys = {"anthropic_api_key", "anthropic_base_url", "claude_default_model"}
-        for k in result:
-            assert k in valid_keys
+from src.config import Settings, settings
 
 
 class TestSettings:
@@ -40,6 +27,9 @@ class TestSettings:
     def test_has_gemini_property(self):
         assert isinstance(settings.has_gemini, bool)
 
+    def test_has_any_api_key_property(self):
+        assert isinstance(settings.has_any_api_key, bool)
+
     def test_agent_urls(self):
         assert settings.multimodal_agent_url == "http://127.0.0.1:8001"
         assert settings.code_agent_url == "http://127.0.0.1:8002"
@@ -52,6 +42,16 @@ class TestSettings:
     def test_log_level(self):
         assert settings.log_level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
-    def test_base_url_non_empty(self):
-        assert len(settings.anthropic_base_url) > 0
-        assert settings.anthropic_base_url.startswith("https://")
+    def test_deepseek_url_default(self):
+        assert settings.deepseek_url == "https://api.deepseek.com/anthropic"
+
+    def test_client_for_returns_dict(self):
+        cfg = settings.client_for("code")
+        assert isinstance(cfg, dict)
+        assert "api_key" in cfg
+        assert "base_url" in cfg
+
+    def test_settings_is_singleton(self):
+        s2 = Settings()
+        assert settings.host == s2.host
+        assert settings.port == s2.port
