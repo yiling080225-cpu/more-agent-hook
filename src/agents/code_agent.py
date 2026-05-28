@@ -27,7 +27,7 @@ CODE_AGENT_CARD = AgentCard(
         ],
     },
     endpoint=f"http://{settings.host}:{settings.code_agent_port}/a2a",
-    model=settings.code_model,
+    model=settings.model_for("code"),
     max_context_tokens=200000,
 )
 
@@ -138,7 +138,7 @@ class CodeAgent(BaseAgent):
         from anthropic import AsyncAnthropic
         cfg = settings.client_for("code")
         self.client = AsyncAnthropic(**cfg)
-        self.model = settings.code_model
+        self.model = settings.model_for("code")
 
     async def execute(self, task: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         task_type = task.get("type", "backend")

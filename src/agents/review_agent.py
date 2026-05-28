@@ -27,7 +27,7 @@ REVIEW_AGENT_CARD = AgentCard(
         ],
     },
     endpoint=f"http://{settings.host}:{settings.review_agent_port}/a2a",
-    model=settings.review_model,
+    model=settings.model_for("review"),
     max_context_tokens=128000,
     max_review_rounds=3,
     token_budget_per_review=50000,
@@ -74,7 +74,7 @@ class ReviewAgent(BaseAgent):
         from anthropic import AsyncAnthropic
         cfg = settings.client_for("review")
         self.client = AsyncAnthropic(**cfg)
-        self.model = settings.review_model
+        self.model = settings.model_for("review")
         self.max_rounds = 3
         self.token_budget = 50000
         self._round_history: Dict[str, List[Dict[str, Any]]] = {}

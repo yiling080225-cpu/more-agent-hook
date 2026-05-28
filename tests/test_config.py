@@ -16,10 +16,10 @@ class TestSettings:
         assert settings.review_agent_port == 8003
 
     def test_model_names(self):
-        assert isinstance(settings.multimodal_model, str)
-        assert isinstance(settings.code_model, str)
-        assert isinstance(settings.review_model, str)
-        assert isinstance(settings.router_model, str)
+        assert isinstance(settings.model_for("multimodal"), str)
+        assert isinstance(settings.model_for("code"), str)
+        assert isinstance(settings.model_for("review"), str)
+        assert isinstance(settings.model_for("router"), str)
 
     def test_has_anthropic_property(self):
         assert isinstance(settings.has_anthropic, bool)

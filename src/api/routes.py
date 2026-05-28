@@ -219,9 +219,9 @@ async def system_info():
         "config": {
             "host": settings.host,
             "port": settings.port,
-            "multimodal_model": settings.multimodal_model,
-            "code_model": settings.code_model,
-            "review_model": settings.review_model,
+            "multimodal_model": settings.model_for("multimodal"),
+            "code_model": settings.model_for("code"),
+            "review_model": settings.model_for("review"),
         },
         "agents": agent_registry.get_status_summary(),
         "mcp_tools": len(mcp_registry.list_tools()),

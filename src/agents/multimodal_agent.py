@@ -28,7 +28,7 @@ MULTIMODAL_AGENT_CARD = AgentCard(
         ],
     },
     endpoint=f"http://{settings.host}:{settings.multimodal_agent_port}/a2a",
-    model=settings.multimodal_model,
+    model=settings.model_for("multimodal"),
     max_context_tokens=1048576,
 )
 
@@ -40,7 +40,7 @@ class MultimodalAgent(BaseAgent):
         super().__init__(card=MULTIMODAL_AGENT_CARD)
         self._gemini_client = None
         self._anthropic_client = None
-        self.model = settings.multimodal_model
+        self.model = settings.model_for("multimodal")
 
         # 初始化 Gemini 客户端 (可选)
         if settings.gemini_key:

@@ -59,7 +59,7 @@ class FederationSupervisor:
     def __init__(self):
         self.router_client = None
         self.router_anthropic = None
-        self.router_model = settings.router_model
+        self.router_model = settings.model_for("router")
 
         # 优先 Gemini (需翻墙)
         if settings.gemini_key and HAS_GENAI:
