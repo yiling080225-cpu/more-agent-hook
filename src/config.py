@@ -87,11 +87,11 @@ class Settings(BaseSettings):
     glm_model: str = "glm-4.6V"
 
     gpt_key: str = ""
-    gpt_url: str = "https://shiyunapi.com"
+    gpt_url: str = ""
     gpt_model: str = "gpt-5.5"
 
     opus_key: str = ""
-    opus_url: str = "https://shiyunapi.com"
+    opus_url: str = ""
     opus_model: str = "claude-opus-4-7"
 
     clawsocket_key: str = ""
