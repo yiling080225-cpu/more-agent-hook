@@ -28,17 +28,21 @@ logger = structlog.get_logger()
 ROUTING_PROMPT = """你是一个多模态 Agent 联邦的任务路由器。根据用户输入和偏好设置，选择最合适的 Agent。
 
 可用 Agent:
-- multimodal_design_agent: 处理图像/视频/音频的多模态理解，UI 设计规范生成
+- multimodal_design_agent: 处理图像/视频/音频的多模态理解，UI 设计规范生成，SVG 图表，CAD 建模
 - secure_code_agent: 复杂代码生成 (后端 API、数据库、安全相关)，类型安全的开发
 - code_review_agent: 代码审查、安全漏洞检测、多轮辩论式审查
+- prompt_engineer_agent: 提示词设计、调试、优化、A/B 测试、结构化输出设计
+- project_architect_agent: 项目架构规划、技术栈选型、模块划分、系统设计、框架设计
 - workflow_orchestrator: 长周期多步骤工作流编排 (当任务涉及多个阶段时)
 
 选择规则:
-1. 如果用户上传了图片/视频/音频，或要求 UI 设计/页面设计/前端 → multimodal_design_agent
+1. 如果用户上传了图片/视频/音频，或要求 UI 设计/页面设计/前端/CAD 建模 → multimodal_design_agent
 2. 如果用户要求生成代码/开发功能/编写 API → secure_code_agent
 3. 如果用户要求审查代码/检查安全性/代码评审 → code_review_agent
-4. 如果任务涉及多个阶段 (分析→设计→开发→审查→部署) → workflow_orchestrator
-5. 简单问答/说明类请求: 直接回答，不需要委托 Agent
+4. 如果用户要求设计/优化/调试提示词/prompt/system prompt → prompt_engineer_agent
+5. 如果用户要求规划架构/技术选型/系统设计/项目框架/模块设计 → project_architect_agent
+6. 如果任务涉及多个阶段 (分析→设计→开发→审查→部署) → workflow_orchestrator
+7. 简单问答/说明类请求: 直接回答，不需要委托 Agent
 
 用户偏好（如提供）包含设计风格、主题色、输出框架等，应传递给对应 Agent。
 若用户上传了文件，将以 [文件内容摘要]...[/文件内容摘要] 形式给出前 1500 字 — 这通常是判断真实意图的关键依据，请优先采信文件内容而非模糊的用户文字。
@@ -49,7 +53,7 @@ ROUTING_PROMPT = """你是一个多模态 Agent 联邦的任务路由器。根�
     "reason": "选择理由",
     "is_multi_stage": true/false,
     "extracted_requirements": "摘要",
-    "task_type": "web_page/svg_diagram/cad_from_sketch/cad_model/ui_design/代码生成/代码审查/多阶段工作流/直接回答"
+    "task_type": "web_page/svg_diagram/cad_from_sketch/cad_model/ui_design/代码生成/代码审查/提示词工程/架构规划/多阶段工作流/直接回答"
 }"""
 
 
@@ -273,6 +277,14 @@ class FederationSupervisor:
         build123d_keywords = ["build123d", "step文件", "step 文件", "stp", "制造",
                              "cnc", "数控", "装配", "装配体", "螺栓", "轴承", "齿轮箱"]
         review_keywords = ["审查", "review", "检查", "安全", "漏洞", "评审"]
+        prompt_keywords = ["提示词", "prompt", "prompt engineering", "system prompt", "优化提示",
+                          "调试提示", "设计提示", "prompt 优化", "prompt 设计", "prompt 调试",
+                          "提示词工程", "提示词设计", "提示词优化", "提示词测试", "few-shot",
+                          "结构化输出", "prompt template", "提示词模板"]
+        architect_keywords = ["架构", "技术选型", "系统设计", "模块划分", "框架设计", "项目规划",
+                             "architecture", "tech stack", "system design", "方案设计",
+                             "架构设计", "框架规划", "项目框架", "技术方案", "技术架构",
+                             "软件架构", "整体设计", "选型"]
         code_keywords = ["代码", "开发", "实现", "API", "接口", "写个", "生成", "build", "create", "implement"]
         workflow_keywords = ["部署", "deploy", "工作流", "workflow", "流程", "全栈", "从零", "项目"]
 
@@ -301,6 +313,12 @@ class FederationSupervisor:
         elif any(kw in combined for kw in review_keywords):
             return {"agent": "code_review_agent", "reason": "代码审查需求",
                     "is_multi_stage": False, "task_type": "代码审查"}
+        elif any(kw in combined_lower for kw in prompt_keywords):
+            return {"agent": "prompt_engineer_agent", "reason": "提示词工程需求",
+                    "is_multi_stage": False, "task_type": "prompt_design"}
+        elif any(kw in combined_lower for kw in architect_keywords):
+            return {"agent": "project_architect_agent", "reason": "架构规划需求",
+                    "is_multi_stage": False, "task_type": "architecture_plan"}
         elif any(kw in combined for kw in code_keywords):
             return {"agent": "secure_code_agent", "reason": "代码生成需求",
                     "is_multi_stage": False, "task_type": "代码生成"}
@@ -345,7 +363,7 @@ class FederationSupervisor:
     def _assess_review_need(self, agent_name: str, response: A2ATaskResponse) -> bool:
         """评估是否需要人工审查"""
         # 高风险 Agent: 始终需要审查
-        high_risk = ["secure_code_agent", "code_review_agent"]
+        high_risk = ["secure_code_agent", "code_review_agent", "prompt_engineer_agent", "project_architect_agent"]
         if agent_name in high_risk:
             return True
 

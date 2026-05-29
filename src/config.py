@@ -32,6 +32,13 @@ def _load_ccswitch_keys() -> dict[str, str]:
                 continue
             if not token:
                 continue
+            # 标准化 URL: 去除 SDK 会自动追加的路径后缀
+            if url:
+                url = url.rstrip("/")
+                for suffix in ("/v1/messages", "/v1/chat/completions", "/v1"):
+                    if url.endswith(suffix):
+                        url = url[: -len(suffix)]
+                        break
             name_lower = name.lower()
             if "deepseek" in name_lower:
                 keys.setdefault("deepseek_key", token)
@@ -39,6 +46,12 @@ def _load_ccswitch_keys() -> dict[str, str]:
                     keys.setdefault("deepseek_url", url)
                 if model:
                     keys.setdefault("deepseek_model", model)
+            elif "gpt" in name_lower:
+                keys.setdefault("gpt_key", token)
+                if url:
+                    keys.setdefault("gpt_url", url)
+                if model:
+                    keys.setdefault("gpt_model", model)
             elif "opus" in name_lower:
                 keys.setdefault("opus_key", token)
                 if url:
@@ -73,6 +86,10 @@ class Settings(BaseSettings):
     glm_url: str = "https://open.bigmodel.cn/api/anthropic"
     glm_model: str = "glm-4.6V"
 
+    gpt_key: str = ""
+    gpt_url: str = "https://shiyunapi.com"
+    gpt_model: str = "gpt-5.5"
+
     opus_key: str = ""
     opus_url: str = "https://shiyunapi.com"
     opus_model: str = "claude-opus-4-7"
@@ -93,20 +110,22 @@ class Settings(BaseSettings):
     multimodal_agent_port: int = 8001
     code_agent_port: int = 8002
     review_agent_port: int = 8003
+    prompt_agent_port: int = 8004
+    architect_agent_port: int = 8005
 
     # ── 能力检测 ──
 
     @property
     def has_any_api_key(self) -> bool:
-        return bool(self.deepseek_key or self.glm_key or self.clawsocket_key or self.gemini_key or self.opus_key)
+        return bool(self.deepseek_key or self.glm_key or self.clawsocket_key or self.gemini_key or self.gpt_key or self.opus_key)
 
     @property
     def has_anthropic(self) -> bool:
-        return bool(self.clawsocket_key or self.opus_key)
+        return bool(self.clawsocket_key or self.gpt_key or self.opus_key)
 
     @property
     def anthropic_base_url(self) -> str:
-        return self.opus_url or self.clawsocket_url
+        return self.gpt_url or self.opus_url or self.clawsocket_url
 
     @property
     def has_gemini(self) -> bool:
@@ -119,23 +138,31 @@ class Settings(BaseSettings):
         if agent == "multimodal":
             if self.glm_key:
                 return {"api_key": self.glm_key, "base_url": self.glm_url}
-            if self.opus_key:
-                return {"api_key": self.opus_key, "base_url": self.opus_url}
+            if self.gpt_key:
+                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
             return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
         if agent == "code" or agent == "router":
-            # DeepSeek 优先 (便宜、1M 上下文、分类/编码足够强)
             if self.deepseek_key:
                 return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
-            if self.opus_key:
-                return {"api_key": self.opus_key, "base_url": self.opus_url}
+            if self.gpt_key:
+                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
             return {"api_key": "", "base_url": ""}
-        # review: Opus > DeepSeek (审查是高风险的, 值得用最强推理)
-        if self.opus_key:
-            return {"api_key": self.opus_key, "base_url": self.opus_url}
-        if self.deepseek_key:
-            return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
-        if self.glm_key:
-            return {"api_key": self.glm_key, "base_url": self.glm_url}
+        if agent == "review":
+            # GPT > DeepSeek > GLM (审查用最强的推理能力)
+            if self.gpt_key:
+                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
+            if self.deepseek_key:
+                return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
+            if self.glm_key:
+                return {"api_key": self.glm_key, "base_url": self.glm_url}
+            return {"api_key": "", "base_url": ""}
+        # prompt / architect: GPT 专属，后备 DeepSeek
+        if agent in ("prompt", "architect"):
+            if self.gpt_key:
+                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
+            if self.deepseek_key:
+                return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
+            return {"api_key": "", "base_url": ""}
         return {"api_key": "", "base_url": ""}
 
     def model_for(self, agent: str) -> str:
@@ -143,22 +170,31 @@ class Settings(BaseSettings):
         if agent == "multimodal":
             if self.glm_key:
                 return self.glm_model
-            if self.opus_key:
-                return self.opus_model
+            if self.gpt_key:
+                return self.gpt_model
             return self.deepseek_model
         if agent == "code" or agent == "router":
             if self.deepseek_key:
                 return self.deepseek_model
-            if self.opus_key:
-                return self.opus_model
+            if self.gpt_key:
+                return self.gpt_model
             return "deepseek-chat"
-        # review: Opus > DeepSeek > GLM
-        if self.opus_key:
-            return self.opus_model
-        if self.deepseek_key:
-            return self.deepseek_model
-        if self.glm_key:
-            return self.glm_model
+        if agent == "review":
+            # GPT > DeepSeek > GLM
+            if self.gpt_key:
+                return self.gpt_model
+            if self.deepseek_key:
+                return self.deepseek_model
+            if self.glm_key:
+                return self.glm_model
+            return "deepseek-chat"
+        # prompt / architect: GPT 专属
+        if agent in ("prompt", "architect"):
+            if self.gpt_key:
+                return self.gpt_model
+            if self.deepseek_key:
+                return self.deepseek_model
+            return "deepseek-chat"
         return "deepseek-chat"
 
     # ── URL 快捷属性 ──
@@ -174,6 +210,14 @@ class Settings(BaseSettings):
     @property
     def review_agent_url(self) -> str:
         return f"http://{self.host}:{self.review_agent_port}"
+
+    @property
+    def prompt_agent_url(self) -> str:
+        return f"http://{self.host}:{self.prompt_agent_port}"
+
+    @property
+    def architect_agent_url(self) -> str:
+        return f"http://{self.host}:{self.architect_agent_port}"
 
     @property
     def gateway_url(self) -> str:

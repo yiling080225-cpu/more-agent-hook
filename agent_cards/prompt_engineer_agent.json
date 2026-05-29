@@ -1,0 +1,22 @@
+{
+  "name": "prompt_engineer_agent",
+  "description": "提示词工程专家：设计、调试、优化 LLM 提示词，A/B 测试，结构化输出设计",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "requirements"],
+    "output": ["prompt_template", "test_cases", "evaluation", "json"],
+    "skills": [
+      "prompt_design",
+      "prompt_debugging",
+      "prompt_optimization",
+      "few_shot_examples",
+      "chain_of_thought",
+      "structured_output",
+      "prompt_testing"
+    ]
+  },
+  "endpoint": "http://127.0.0.1:8004/a2a",
+  "mcp_servers": [],
+  "model": "gpt-5.5",
+  "max_context_tokens": 128000
+}

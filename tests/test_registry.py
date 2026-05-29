@@ -25,7 +25,7 @@ def test_card():
 class TestAgentRegistryLoad:
     def test_loads_all_cards(self, registry):
         agents = registry.list_all()
-        assert len(agents) == 3
+        assert len(agents) == 5
 
     def test_get_by_name(self, registry):
         card = registry.get("multimodal_design_agent")
@@ -44,7 +44,7 @@ class TestAgentRegistryOperations:
     def test_register_new(self, registry, test_card):
         registry.register(test_card)
         assert registry.get("test_agent") is not None
-        assert len(registry.list_all()) == 4
+        assert len(registry.list_all()) == 6
 
     def test_unregister(self, registry, test_card):
         registry.register(test_card)
@@ -72,10 +72,12 @@ class TestAgentRegistryOperations:
             "multimodal_design_agent",
             "secure_code_agent",
             "code_review_agent",
+            "prompt_engineer_agent",
+            "project_architect_agent",
         }
 
     def test_status_summary(self, registry):
         summary = registry.get_status_summary()
-        assert summary["total_agents"] == 3
+        assert summary["total_agents"] == 5
         assert summary["available_agents"] == 0
         assert "multimodal_design_agent" in summary["agents"]

@@ -115,13 +115,17 @@ async def run_all():
     from src.agents.multimodal_agent import MultimodalAgent
     from src.agents.code_agent import CodeAgent
     from src.agents.review_agent import ReviewAgent
+    from src.agents.prompt_agent import PromptAgent
+    from src.agents.architect_agent import ArchitectAgent
 
-    # 并行启动 4 个服务
+    # 并行启动 6 个服务
     await asyncio.gather(
         run_gateway(8000),
         run_agent(MultimodalAgent, "multimodal_design_agent", 8001),
         run_agent(CodeAgent, "secure_code_agent", 8002),
         run_agent(ReviewAgent, "code_review_agent", 8003),
+        run_agent(PromptAgent, "prompt_engineer_agent", 8004),
+        run_agent(ArchitectAgent, "project_architect_agent", 8005),
     )
 
 
@@ -142,17 +146,23 @@ def main():
         from src.agents.multimodal_agent import MultimodalAgent
         from src.agents.code_agent import CodeAgent
         from src.agents.review_agent import ReviewAgent
+        from src.agents.prompt_agent import PromptAgent
+        from src.agents.architect_agent import ArchitectAgent
 
         print("\n  启动 Agent 服务...")
-        print(f"  - Multimodal Agent : http://127.0.0.1:8001")
-        print(f"  - Code Agent       : http://127.0.0.1:8002")
-        print(f"  - Review Agent     : http://127.0.0.1:8003")
+        print(f"  - Multimodal Agent   : http://127.0.0.1:8001")
+        print(f"  - Code Agent         : http://127.0.0.1:8002")
+        print(f"  - Review Agent       : http://127.0.0.1:8003")
+        print(f"  - Prompt Engineer    : http://127.0.0.1:8004")
+        print(f"  - Project Architect  : http://127.0.0.1:8005")
         print()
 
         asyncio.run(asyncio.gather(
             run_agent(MultimodalAgent, "multimodal_design_agent", 8001),
             run_agent(CodeAgent, "secure_code_agent", 8002),
             run_agent(ReviewAgent, "code_review_agent", 8003),
+            run_agent(PromptAgent, "prompt_engineer_agent", 8004),
+            run_agent(ArchitectAgent, "project_architect_agent", 8005),
         ))
     elif args.gateway:
         print(f"\n  启动 Gateway...")
@@ -163,12 +173,14 @@ def main():
         asyncio.run(run_gateway(args.port))
     else:
         print(f"\n  启动全部服务...")
-        print(f"  - Gateway         : http://127.0.0.1:8000")
-        print(f"  - Dashboard       : http://127.0.0.1:8000/dashboard")
-        print(f"  - API Docs        : http://127.0.0.1:8000/docs")
-        print(f"  - Multimodal Agent: http://127.0.0.1:8001")
-        print(f"  - Code Agent      : http://127.0.0.1:8002")
-        print(f"  - Review Agent    : http://127.0.0.1:8003")
+        print(f"  - Gateway           : http://127.0.0.1:8000")
+        print(f"  - Dashboard         : http://127.0.0.1:8000/dashboard")
+        print(f"  - API Docs          : http://127.0.0.1:8000/docs")
+        print(f"  - Multimodal Agent  : http://127.0.0.1:8001")
+        print(f"  - Code Agent        : http://127.0.0.1:8002")
+        print(f"  - Review Agent      : http://127.0.0.1:8003")
+        print(f"  - Prompt Engineer   : http://127.0.0.1:8004")
+        print(f"  - Project Architect : http://127.0.0.1:8005")
         print()
         asyncio.run(run_all())
 

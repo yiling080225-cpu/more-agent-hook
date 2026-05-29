@@ -1,0 +1,21 @@
+{
+  "name": "project_architect_agent",
+  "description": "项目框架规划专家：架构设计、技术栈选型、模块划分、项目蓝图",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "requirements", "constraints"],
+    "output": ["architecture_doc", "tech_stack", "module_plan", "json"],
+    "skills": [
+      "architecture_design",
+      "technology_selection",
+      "module_decomposition",
+      "framework_planning",
+      "system_design",
+      "tradeoff_analysis"
+    ]
+  },
+  "endpoint": "http://127.0.0.1:8005/a2a",
+  "mcp_servers": [],
+  "model": "gpt-5.5",
+  "max_context_tokens": 128000
+}
