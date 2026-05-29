@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 # ── 从 CC-Switch DB 自动读取 API Key + URL + Model ──
-_CCSWITCH_DB = Path(os.path.expandvars(r"%USERPROFILE%\.cc-switch\cc-switch.db"))
+_CCSWITCH_DB = Path.home() / ".cc-switch" / "cc-switch.db"
 
 
 def _load_ccswitch_keys() -> dict[str, str]:

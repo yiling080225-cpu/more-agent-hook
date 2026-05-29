@@ -2,7 +2,7 @@
 
 > **哪个 Agent 能力强就用哪个** — 本地可运行的 Agent Federation 最小可行产品
 
-3 个协作 AI Agent（多模态设计 / 安全代码生成 / 代码审查）通过 Gateway 统一调度，支持 LangGraph 工作流编排、A2A 协议通信、MCP 工具集成。
+5 个协作 AI Agent（多模态设计 / 安全代码生成 / 代码审查 / 提示词工程 / 项目架构）通过 Gateway 统一调度，支持 LangGraph 工作流编排、A2A 协议通信、MCP 工具集成。
 
 ---
 
@@ -20,7 +20,7 @@ cp .env.example .env
 # 3. 校验配置
 python validate_setup.py
 
-# 4. 启动全部服务 (Gateway + 3 Agent)
+# 4. 启动全部服务 (Gateway + 5 Agent)
 python run.py
 
 # 5. 浏览器打开 Dashboard
@@ -34,6 +34,7 @@ python run.py
 | DeepSeek (推荐) | `DEEPSEEK_KEY` | platform.deepseek.com |
 | 智谱 GLM | `GLM_KEY` | open.bigmodel.cn |
 | Gemini | `GEMINI_KEY` | aistudio.google.com |
+| GPT / Opus (代理) | `GPT_KEY` / `OPUS_KEY` | 需配置代理 URL |
 
 ---
 
@@ -43,24 +44,26 @@ python run.py
 用户输入 (Dashboard / API / CLI)
         |
 [Gateway :8000] — 总调度 + A2A 路由 + 工作流控制
-   |         |         |
-   | A2A     | A2A     | A2A
-   v         v         v
-[Multimodal] [Code]   [Review]
-  :8001      :8002    :8003
+   |     |     |     |     |
+   | A2A | A2A | A2A | A2A | A2A
+   v     v     v     v     v
+[Multi] [Code] [Review] [Prompt] [Architect]
+ :8001  :8002   :8003    :8004     :8005
 
 LangGraph 工作流:
-  需求解析 → 多模态分析 → 人工审批 → 代码生成 → 审查 → 完成
+  需求解析 -> 多模态分析 -> 人工审批 -> 代码生成 -> 审查 -> 完成
                   ↑ Checkpoint (SQLite) ↑ 断点恢复
 ```
 
-## 3 个核心 Agent
+## 5 个核心 Agent
 
 | Agent | 端口 | 能力 | 默认模型 |
 |-------|------|------|------|
 | **Multimodal** | 8001 | 图像理解、UI 设计规范生成、网页/SVG/CAD 产出 | deepseek-chat |
 | **Code** | 8002 | 前端/后端代码生成、API 设计 | deepseek-chat |
 | **Review** | 8003 | 多轮代码审查、安全漏洞检测 | deepseek-chat |
+| **Prompt Engineer** | 8004 | 提示词设计/调试/优化、A/B 测试 | deepseek-chat |
+| **Project Architect** | 8005 | 架构规划、技术选型、系统设计 | deepseek-chat |
 
 所有模型可通过 `.env` 文件中的 `*_MODEL` 变量自由替换。
 
@@ -120,11 +123,11 @@ python fedcli.py status               # 查看任务列表
 ├── Dockerfile / docker-compose.yml # 容器化部署
 ├── .env.example                    # 环境配置模板
 ├── mcp_config.yaml                 # MCP 工具配置
-├── agent_cards/                    # 3 个 Agent Card (JSON)
+├── agent_cards/                    # 5 个 Agent Card (JSON)
 ├── src/
 │   ├── config.py                   # 配置管理
 │   ├── api/       (routes, schemas)
-│   ├── agents/    (base, multimodal, code, review)
+│   ├── agents/    (base, multimodal, code, review, prompt, architect)
 │   ├── gateway/   (supervisor, registry, a2a_client)
 │   ├── workflow/  (ecommerce_workflow, checkpoint)
 │   ├── mcp/       (registry, tools/)
@@ -137,7 +140,7 @@ python fedcli.py status               # 查看任务列表
 
 | 原始方案 | MVP 实现 |
 |---------|---------|
-| 8 Agent (GCP 部署) | 3 Agent (本地多端口) |
+| 8 Agent (GCP 部署) | 5 Agent (本地多端口) |
 | Firestore Checkpoint | SQLite Checkpoint |
 | Cloud Run / GKE | 单进程 asyncio |
 | 11 个外部 MCP Server | 6 个内置工具 |

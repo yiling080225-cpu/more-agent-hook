@@ -37,7 +37,7 @@ test = [
 ]
 
 [project.urls]
-Repository = "https://github.com/yiling080225-cpu/3agent-1.1"
+Repository = "https://github.com/yiling080225-cpu/more-agent-hook"
 
 [tool.setuptools.packages.find]
 include = ["src*", "federation_sdk*"]

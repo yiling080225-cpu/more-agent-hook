@@ -16,5 +16,5 @@ RUN if [ ! -f .env ]; then cp .env.example .env; fi
 RUN mkdir -p data
 
 # 启动
-EXPOSE 8000 8001 8002 8003
+EXPOSE 8000 8001 8002 8003 8004 8005
 CMD ["python", "run.py"]

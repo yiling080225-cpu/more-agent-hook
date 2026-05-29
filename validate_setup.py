@@ -51,7 +51,7 @@ def main():
     load_dotenv()
 
     has_key = False
-    for var in ["DEEPSEEK_KEY", "GLM_KEY", "GEMINI_KEY"]:
+    for var in ["DEEPSEEK_KEY", "GLM_KEY", "GEMINI_KEY", "GPT_KEY", "OPUS_KEY", "CLAWSOCKET_KEY"]:
         val = os.getenv(var, "")
         if val and val != f"sk-your-{var.lower().replace('_', '-')}-here" and not val.startswith("your-"):
             print(f"  [PASS] {var} 已配置")
