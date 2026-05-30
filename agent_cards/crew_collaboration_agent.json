@@ -1,0 +1,14 @@
+{
+  "name": "crew_collaboration_agent",
+  "description": "多角色协作专家：内容文案、市场分析、多角色对话、创意协作",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "context", "roles"],
+    "output": ["dialogue", "copy", "analysis", "json"],
+    "skills": ["multi_role_dialogue", "content_copywriting", "market_analysis", "brainstorming", "persona_simulation", "creative_collaboration"]
+  },
+  "endpoint": "http://127.0.0.1:8010/a2a",
+  "mcp_servers": [],
+  "model": "gpt-5.5",
+  "max_context_tokens": 128000
+}

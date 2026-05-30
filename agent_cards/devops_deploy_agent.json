@@ -1,0 +1,14 @@
+{
+  "name": "devops_deploy_agent",
+  "description": "DevOps 部署专家：CI/CD 配置、Docker/K8s 编排、环境管理、部署脚本",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "code", "infra_spec"],
+    "output": ["deploy_config", "dockerfile", "yaml", "json"],
+    "skills": ["ci_cd_pipeline", "docker_config", "kubernetes_manifest", "github_actions", "infrastructure_as_code", "deployment_strategy"]
+  },
+  "endpoint": "http://127.0.0.1:8006/a2a",
+  "mcp_servers": [],
+  "model": "deepseek-chat",
+  "max_context_tokens": 128000
+}

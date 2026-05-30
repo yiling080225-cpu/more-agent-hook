@@ -14,8 +14,8 @@
       "security_best_practices"
     ]
   },
-  "endpoint": "http://127.0.0.1:8002/a2a",
+  "endpoint": "http://127.0.0.1:8004/a2a",
   "mcp_servers": [],
-  "model": "deepseek-chat",
+  "model": "gpt-5.5",
   "max_context_tokens": 200000
 }

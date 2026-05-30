@@ -1,0 +1,14 @@
+{
+  "name": "security_audit_agent",
+  "description": "安全审计专家：渗透测试、合规检查、OWASP 扫描、漏洞评估",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "code", "config"],
+    "output": ["audit_report", "risk_assessment", "remediation_plan", "json"],
+    "skills": ["penetration_test", "owasp_scan", "compliance_check", "vulnerability_assessment", "code_hardening", "security_review"]
+  },
+  "endpoint": "http://127.0.0.1:8012/a2a",
+  "mcp_servers": [],
+  "model": "claude-opus-4-7",
+  "max_context_tokens": 128000
+}

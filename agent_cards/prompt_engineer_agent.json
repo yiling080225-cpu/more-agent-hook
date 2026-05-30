@@ -15,7 +15,7 @@
       "prompt_testing"
     ]
   },
-  "endpoint": "http://127.0.0.1:8004/a2a",
+  "endpoint": "http://127.0.0.1:8009/a2a",
   "mcp_servers": [],
   "model": "gpt-5.5",
   "max_context_tokens": 128000

@@ -1,4 +1,4 @@
-"""联邦总调度器: 智能路由 + 任务委托 + Human-in-the-loop"""
+"""联邦总调度器: 智能路由 + 任务委托 + 12 Agent 协作管道 + Human-in-the-loop"""
 
 import os
 import structlog
@@ -25,47 +25,67 @@ from ..utils._content import extract_text
 
 logger = structlog.get_logger()
 
-ROUTING_PROMPT = """你是一个多模态 Agent 联邦的任务路由器。根据用户输入和偏好设置，选择最合适的 Agent。
+ROUTING_PROMPT = """你是一个 12 Agent 联邦的任务路由器。根据用户输入和偏好设置，选择最合适的 Agent。
 
-可用 Agent:
-- multimodal_design_agent: 处理图像/视频/音频的多模态理解，UI 设计规范生成，SVG 图表，CAD 建模
-- secure_code_agent: 复杂代码生成 (后端 API、数据库、安全相关)，类型安全的开发
-- code_review_agent: 代码审查、安全漏洞检测、多轮辩论式审查
-- prompt_engineer_agent: 提示词设计、调试、优化、A/B 测试、结构化输出设计
-- project_architect_agent: 项目架构规划、技术栈选型、模块划分、系统设计、框架设计
-- workflow_orchestrator: 长周期多步骤工作流编排 (当任务涉及多个阶段时)
+可用 Agent (4 层架构):
+
+[设计层]
+- multimodal_design_agent: 图像/视频/音频多模态理解，UI设计规范，网页生成，SVG图表，CAD/3D建模
+- ux_interaction_agent: 交互设计，用户体验，动效设计，可用性分析，线框图生成
+- brand_creative_agent: 品牌视觉系统，色彩搭配，字体规范，设计Token，风格指南
+
+[工程层]
+- secure_code_agent: 前端/后端代码生成，API设计，数据库Schema，类型安全开发
+- testing_qa_agent: 测试用例生成，自动化测试(pytest/jest)，边界条件检测，覆盖率分析
+- devops_deploy_agent: CI/CD配置，Docker/K8s编排，GitHub Actions，部署脚本
+- code_review_agent: 代码审查，安全漏洞检测，多轮辩论式审查
+
+[战略层]
+- project_architect_agent: 架构规划，技术栈选型，模块划分，系统设计
+- prompt_engineer_agent: 提示词设计/调试/优化，A/B测试，结构化输出设计
+- crew_collaboration_agent: 多角色对话协作，内容文案，市场分析，创意头脑风暴
+
+[基础层]
+- knowledge_rag_agent: 文档解析，向量检索，RAG问答，上下文增强
+- security_audit_agent: 渗透测试，合规检查，OWASP扫描，漏洞评估，代码加固
 
 选择规则:
-1. 如果用户上传了图片/视频/音频，或要求 UI 设计/页面设计/前端/CAD 建模 → multimodal_design_agent
-2. 如果用户要求生成代码/开发功能/编写 API → secure_code_agent
-3. 如果用户要求审查代码/检查安全性/代码评审 → code_review_agent
-4. 如果用户要求设计/优化/调试提示词/prompt/system prompt → prompt_engineer_agent
-5. 如果用户要求规划架构/技术选型/系统设计/项目框架/模块设计 → project_architect_agent
-6. 如果任务涉及多个阶段 (分析→设计→开发→审查→部署) → workflow_orchestrator
-7. 简单问答/说明类请求: 直接回答，不需要委托 Agent
+1. 图片/视频/音频/UI设计/网页/SVG/CAD/3D -> multimodal_design_agent
+2. 交互设计/UX/动效/可用性/线框图/用户体验 -> ux_interaction_agent
+3. 品牌设计/色彩系统/字体/视觉识别/设计规范 -> brand_creative_agent
+4. 代码生成/API开发/数据库/功能实现/写代码 -> secure_code_agent
+5. 测试/单元测试/集成测试/E2E/覆盖率/测试用例 -> testing_qa_agent
+6. 部署/CI/CD/Docker/K8s/Kubernetes/GitHub Actions -> devops_deploy_agent
+7. 代码审查/代码评审/Code Review/查漏洞 -> code_review_agent
+8. 架构规划/技术选型/系统设计/模块划分 -> project_architect_agent
+9. 提示词/Prompt设计/调试/优化 -> prompt_engineer_agent
+10. 多角色协作/内容文案/市场分析/头脑风暴 -> crew_collaboration_agent
+11. 文档理解/知识检索/RAG/查资料 -> knowledge_rag_agent
+12. 安全审计/渗透测试/OWASP/合规检查/漏洞评估 -> security_audit_agent
+13. 全栈项目/从零构建/完整系统 -> workflow_orchestrator (触发多阶段管道)
+14. 简单问答: 直接回答，不委托Agent
 
-用户偏好（如提供）包含设计风格、主题色、输出框架等，应传递给对应 Agent。
-若用户上传了文件，将以 [文件内容摘要]...[/文件内容摘要] 形式给出前 1500 字 — 这通常是判断真实意图的关键依据，请优先采信文件内容而非模糊的用户文字。
+若用户上传了文件，将以 [文件内容摘要]...[/文件内容摘要] 形式给出前 1500 字 — 优先采信文件内容。
 
 返回 JSON:
 {
     "agent": "agent_name 或 null",
     "reason": "选择理由",
-    "is_multi_stage": true/false,
+    "is_pipeline": true/false,
+    "pipeline": "engineering"/"design"/"strategy" 或 null,
     "extracted_requirements": "摘要",
-    "task_type": "web_page/svg_diagram/cad_from_sketch/cad_model/ui_design/代码生成/代码审查/提示词工程/架构规划/多阶段工作流/直接回答"
+    "task_type": "..."
 }"""
 
 
 class FederationSupervisor:
-    """联邦总调度器"""
+    """联邦总调度器 — 12 Agent + 3 条协作管道"""
 
     def __init__(self):
         self.router_client = None
         self.router_anthropic = None
         self.router_model = settings.model_for("router")
 
-        # 优先 Gemini (需翻墙)
         if settings.gemini_key and HAS_GENAI:
             try:
                 self.router_client = genai.Client(api_key=settings.gemini_key)
@@ -73,7 +93,6 @@ class FederationSupervisor:
             except Exception:
                 pass
 
-        # 用 DeepSeek / clawsocket
         if not self.router_client:
             try:
                 from anthropic import AsyncAnthropic
@@ -86,30 +105,17 @@ class FederationSupervisor:
         self._active_workflows: Dict[str, Dict[str, Any]] = {}
 
     async def route_and_execute(self, user_input: UserInput) -> Dict[str, Any]:
-        """
-        分析用户输入，路由到最合适的 Agent 并执行
-
-        返回:
-        {
-            "thread_id": str,
-            "routing": {...},
-            "result": A2ATaskResponse,
-            "requires_human_review": bool,
-        }
-        """
+        """分析用户输入，路由到最合适的 Agent 并执行 (支持管道编排)"""
         import uuid
         thread_id = user_input.context.get("thread_id") or str(uuid.uuid4())
 
-        # 0. 上传文件先转 Markdown (路由 + Agent 共用一份, 避免重复解析)
         files_markdown = ""
         if user_input.files:
             from ..utils.file_extraction import extract_files_to_markdown
             files_markdown = extract_files_to_markdown(user_input.files)
 
-        # 1. 智能路由 (含文件摘要)
         routing = await self._route_task(user_input, files_markdown=files_markdown)
 
-        # 2. 如果不需要 Agent (直接问答)
         if routing["agent"] is None:
             return {
                 "thread_id": thread_id,
@@ -122,22 +128,115 @@ class FederationSupervisor:
                 "requires_human_review": False,
             }
 
-        # 3. 委托给目标 Agent
-        agent_name = routing["agent"]
-        agent_url = agent_registry.get_agent_url(agent_name)
+        # 管道模式: 按顺序执行多个 Agent
+        if routing.get("is_pipeline"):
+            return await self._execute_pipeline(
+                routing, user_input, files_markdown, thread_id
+            )
 
+        # 单 Agent 模式
+        return await self._execute_single(
+            routing["agent"], routing, user_input, files_markdown, thread_id
+        )
+
+    async def _execute_single(
+        self, agent_name: str, routing: dict, user_input: UserInput,
+        files_markdown: str, thread_id: str
+    ) -> Dict[str, Any]:
+        """单 Agent 执行"""
+        agent_url = agent_registry.get_agent_url(agent_name)
         if not agent_url:
             return {
                 "thread_id": thread_id,
                 "routing": routing,
-                "result": {"status": "failed", "thread_id": thread_id, "error": f"Agent '{agent_name}' 未注册或不可用"},
+                "result": {"status": "failed", "thread_id": thread_id,
+                           "error": f"Agent '{agent_name}' 未注册或不可用"},
                 "requires_human_review": False,
             }
 
-        # 构建任务 (context 中的 style/theme/output_format 自动传入)
-        # files_markdown 已在路由前提取, 直接复用
+        task = self._build_task(user_input, files_markdown, routing, thread_id)
+        response = await a2a_client.send_task(
+            endpoint=agent_url, task=task, agent_name=agent_name, context=user_input.context,
+        )
 
-        task = {
+        preview_path = self._save_direct_output(
+            routing.get("task_type", ""), response.model_dump(), thread_id
+        )
+        needs_review = self._assess_review_need(agent_name, response)
+
+        return {
+            "thread_id": thread_id,
+            "routing": routing,
+            "result": response.model_dump(),
+            "requires_human_review": needs_review,
+            "preview_path": preview_path,
+        }
+
+    async def _execute_pipeline(
+        self, routing: dict, user_input: UserInput, files_markdown: str, thread_id: str
+    ) -> Dict[str, Any]:
+        """管道模式: 按顺序执行多个 Agent，前一个输出作为后一个输入"""
+        pipe_name = routing.get("pipeline", "engineering")
+        pipe_map = {
+            "design": settings.pipeline_design,
+            "engineering": settings.pipeline_engineering,
+            "strategy": settings.pipeline_strategy,
+        }
+        agents = pipe_map.get(pipe_name, settings.pipeline_engineering)
+
+        results = []
+        accumulated_context = user_input.text
+
+        for i, agent_name in enumerate(agents):
+            agent_url = agent_registry.get_agent_url(agent_name)
+            if not agent_url:
+                results.append({"agent": agent_name, "status": "skipped", "error": "未注册"})
+                continue
+
+            task = self._build_task(user_input, files_markdown, routing, thread_id)
+            # 管道传递: 后面的 Agent 看到前面 Agent 的产出
+            if i > 0:
+                task["text"] = (
+                    f"上一个 Agent ({agents[i-1]}) 的输出:\n"
+                    f"{str(results[-1].get('result', ''))[:3000]}\n\n"
+                    f"基于以上输出继续处理，原始需求:\n{user_input.text}"
+                )
+                task["pipeline_stage"] = f"{i+1}/{len(agents)}"
+                task["pipeline_agent"] = agent_name
+
+            response = await a2a_client.send_task(
+                endpoint=agent_url, task=task, agent_name=agent_name,
+                context=user_input.context,
+            )
+            results.append({
+                "agent": agent_name,
+                "stage": i + 1,
+                "result": response.model_dump(),
+                "status": response.status.value,
+            })
+            logger.info("pipeline_stage_complete", agent=agent_name, stage=i+1,
+                        pipeline=pipe_name, thread_id=thread_id)
+
+        # 管道最终产出写入 preview/
+        last = results[-1] if results else {}
+        preview_path = self._save_direct_output(
+            routing.get("task_type", ""), last.get("result", {}), thread_id
+        )
+
+        return {
+            "thread_id": thread_id,
+            "routing": routing,
+            "pipeline": pipe_name,
+            "pipeline_results": results,
+            "result": last.get("result", {}),
+            "requires_human_review": True,  # 管道产出始终需要审查
+            "preview_path": preview_path,
+        }
+
+    def _build_task(
+        self, user_input: UserInput, files_markdown: str, routing: dict, thread_id: str
+    ) -> Dict[str, Any]:
+        return {
             "text": user_input.text,
             "images": user_input.images,
             "videos": user_input.videos,
@@ -151,32 +250,8 @@ class FederationSupervisor:
                if k not in ("sandbox", "allow_search")},
         }
 
-        # 4. 发送 A2A 请求
-        response = await a2a_client.send_task(
-            endpoint=agent_url,
-            task=task,
-            agent_name=agent_name,
-            context=user_input.context,
-        )
-
-        # 5. 直接产出类型写入 preview/
-        preview_path = self._save_direct_output(
-            routing.get("task_type", ""), response.model_dump(), thread_id
-        )
-
-        # 6. 判断是否需要人工审查
-        needs_review = self._assess_review_need(agent_name, response)
-
-        return {
-            "thread_id": thread_id,
-            "routing": routing,
-            "result": response.model_dump(),
-            "requires_human_review": needs_review,
-            "preview_path": preview_path,
-        }
-
     async def _route_task(self, user_input: UserInput, files_markdown: str = "") -> Dict[str, Any]:
-        """路由任务：产出型请求 (网页/图表/CAD) 关键词优先，其余走 LLM。"""
+        """路由任务：产出型请求关键词优先，其余走 LLM。"""
         has_multimodal = bool(
             user_input.images or user_input.videos or user_input.audio or user_input.files
         )
@@ -190,36 +265,37 @@ class FederationSupervisor:
             extra_parts.append(f"[偏好主题: {ctx['theme']}]")
         if ctx.get("output_format"):
             extra_parts.append(f"[输出框架: {ctx['output_format']}]")
-        # 文件转 Markdown 摘要喂给路由 LLM, 帮助判断真实意图
         if files_markdown:
             snippet = files_markdown[:1500].strip()
             extra_parts.append(f"[文件内容摘要]\n{snippet}\n[/文件内容摘要]")
         extra = " " + " ".join(extra_parts) if extra_parts else ""
 
-        # 策略 0: 产出型请求关键词优先 (绕过 LLM 避免误判)
+        # 策略 0: 关键词优先 (确定性产出类型, 绕过 LLM 避免误判)
         kw = self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
-        if kw.get("task_type") in ("web_page", "svg_diagram", "cad_model", "cad_from_sketch", "build123d_model"):
+        if kw.get("task_type") in (
+            "web_page", "svg_diagram", "cad_model", "cad_from_sketch", "build123d_model",
+            "security_audit", "brand_identity", "testing", "devops",
+        ):
             return kw
 
         # 策略 1: Gemini 路由
         if self.router_client:
-            return await self._route_via_gemini(user_input, extra, has_multimodal, files_markdown=files_markdown)
+            return await self._route_via_gemini(user_input, extra, has_multimodal)
 
         # 策略 2: Anthropic/DeepSeek 路由
         if self.router_anthropic:
-            return await self._route_via_anthropic(user_input, extra, has_multimodal, files_markdown=files_markdown)
+            return await self._route_via_anthropic(user_input, extra, has_multimodal)
 
         # 策略 3: 关键词降级
         return kw
 
-    async def _route_via_gemini(self, user_input: UserInput, extra: str, has_multimodal: bool, files_markdown: str = "") -> Dict[str, Any]:
+    async def _route_via_gemini(self, user_input: UserInput, extra: str, has_multimodal: bool) -> Dict[str, Any]:
         try:
             resp = self.router_client.models.generate_content(
                 model=self.router_model,
                 contents=f"{ROUTING_PROMPT}\n\n用户输入: {user_input.text}{extra}",
                 config=types.GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=512,
+                    temperature=0.1, max_output_tokens=512,
                     response_mime_type="application/json",
                 ),
             )
@@ -230,22 +306,20 @@ class FederationSupervisor:
             return routing
         except Exception as e:
             logger.warning("gemini_routing_failed", error=str(e))
-            return self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
+            return self._keyword_routing(user_input, has_multimodal)
 
-    async def _route_via_anthropic(self, user_input: UserInput, extra: str, has_multimodal: bool, files_markdown: str = "") -> Dict[str, Any]:
+    async def _route_via_anthropic(self, user_input: UserInput, extra: str, has_multimodal: bool) -> Dict[str, Any]:
         try:
             resp = await self.router_anthropic.messages.create(
-                model=self.router_model,
-                max_tokens=512,
-                messages=[{"role": "user", "content": f"{ROUTING_PROMPT}\n\n用户输入: {user_input.text}{extra}"}],
+                model=self.router_model, max_tokens=512,
+                messages=[{"role": "user",
+                           "content": f"{ROUTING_PROMPT}\n\n用户输入: {user_input.text}{extra}"}],
             )
-            import json
+            import json, re
             text = extract_text(resp.content)
-            # Try to extract JSON
             try:
                 routing = json.loads(text)
             except json.JSONDecodeError:
-                import re
                 match = re.search(r'\{[\s\S]*\}', text)
                 routing = json.loads(match.group()) if match else {"agent": None}
             if has_multimodal and routing.get("agent") is None:
@@ -253,77 +327,150 @@ class FederationSupervisor:
             return routing
         except Exception as e:
             logger.warning("anthropic_routing_failed", error=str(e))
-            return self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
+            return self._keyword_routing(user_input, has_multimodal)
 
     def _keyword_routing(self, user_input: UserInput, has_multimodal: bool, files_markdown: str = "") -> Dict[str, Any]:
-        """降级路由: 关键词匹配 (含产出类型检测)"""
+        """降级路由: 12 Agent 关键词匹配 + 管道触发检测"""
         text = user_input.text
         text_lower = text.lower()
-        # 文件摘要也参与关键词扫描 (用户只说"看看这个"时, 凭文件内容判断意图)
         file_snippet = (files_markdown[:2000] if files_markdown else "")
         file_snippet_lower = file_snippet.lower()
         combined = text + "\n" + file_snippet
         combined_lower = text_lower + "\n" + file_snippet_lower
 
-        # 产出类型检测
+        # ── 产出类型关键词 ──
         web_keywords = ["网页", "页面", "网站", "html", "前端页面", "生成页面", "做个页面", "写个页面",
-                        "landing", "首页", "着陆页", "webpage", "web page"]
+                        "landing", "首页", "着陆页", "webpage", "web page", "homepage", "官网", "主页"]
         diagram_keywords = ["画图", "画个图", "流程图", "svg", "图表", "架构图", "示意图", "思维导图",
-                            "draw", "diagram", "flowchart", "chart", "图形", "可视化"]
+                            "draw", "diagram", "flowchart", "chart", "图形", "可视化", "脑图"]
         cad_keywords = ["cad", "3d", "三维", "模型", "建模", "零件", "齿轮", "机械", "打印",
                         "openscad", "stl", "step", "草图", "草稿", "工程图",
-                        "设计", "支架", "外壳", "壳体", "底座", "法兰",
+                        "支架", "外壳", "壳体", "底座", "法兰",
                         "手机架", "手机壳", "轴", "弹簧", "凸轮", "连杆"]
         build123d_keywords = ["build123d", "step文件", "step 文件", "stp", "制造",
                              "cnc", "数控", "装配", "装配体", "螺栓", "轴承", "齿轮箱"]
-        review_keywords = ["审查", "review", "检查", "安全", "漏洞", "评审"]
-        prompt_keywords = ["提示词", "prompt", "prompt engineering", "system prompt", "优化提示",
-                          "调试提示", "设计提示", "prompt 优化", "prompt 设计", "prompt 调试",
-                          "提示词工程", "提示词设计", "提示词优化", "提示词测试", "few-shot",
-                          "结构化输出", "prompt template", "提示词模板"]
+
+        # ── 12 Agent 关键词 (按优先级) ──
+        ux_keywords = ["交互设计", "ux", "可用性", "usability", "动效", "motion", "动画效果",
+                       "线框图", "wireframe", "用户旅程", "user journey", "信息架构", "体验优化",
+                       "交互原型", "用户体验", "user experience", "交互细节"]
+        brand_keywords = ["品牌设计", "brand", "视觉系统", "设计系统", "design system", "色彩方案",
+                         "配色", "字体搭配", "视觉规范", "vi设计", "品牌规范", "设计token",
+                         "design token", "风格指南", "style guide", "品牌色", "品牌识别"]
+        test_keywords = ["测试", "test", "单元测试", "unit test", "集成测试", "integration test",
+                        "e2e", "端到端", "覆盖率", "coverage", "pytest", "jest", "测试用例",
+                        "自动化测试", "回归测试", "regression test", "性能测试", "边界测试"]
+        devops_keywords = ["部署", "deploy", "docker", "k8s", "kubernetes", "ci/cd", "ci cd",
+                          "pipeline", "github action", "容器化", "负载均衡", "扩容",
+                          "运维", "devops", "terraform", "ansible", "dockerfile", "docker-compose"]
+        review_keywords = ["审查", "review", "代码审查", "code review", "pr review",
+                          "代码质量", "代码规范", "lint", "重构建议"]
         architect_keywords = ["架构", "技术选型", "系统设计", "模块划分", "框架设计", "项目规划",
                              "architecture", "tech stack", "system design", "方案设计",
                              "架构设计", "框架规划", "项目框架", "技术方案", "技术架构",
-                             "软件架构", "整体设计", "选型"]
-        code_keywords = ["代码", "开发", "实现", "API", "接口", "写个", "生成", "build", "create", "implement"]
-        workflow_keywords = ["部署", "deploy", "工作流", "workflow", "流程", "全栈", "从零", "项目"]
+                             "软件架构", "整体设计", "选型", "微服务", "单体架构"]
+        prompt_keywords = ["提示词", "prompt", "prompt engineering", "system prompt", "优化提示",
+                          "调试提示", "设计提示", "提示词工程", "提示词设计", "提示词优化",
+                          "提示词测试", "few-shot", "结构化输出", "prompt template", "提示词模板"]
+        crew_keywords = ["多角色", "文案", "copywriting", "市场分析", "头脑风暴", "brainstorm",
+                        "创意", "内容创作", "广告语", "slogan", "软文", "营销文案",
+                        "角色扮演", "角色模拟", "persona", "协作讨论"]
+        knowledge_keywords = ["文档", "知识库", "检索", "retrieval", "rag", "查资料", "查文档",
+                             "全文搜索", "语义搜索", "pdf", "读文件", "文献"]
+        security_keywords = ["安全审计", "渗透测试", "owasp", "安全扫描", "漏洞评估",
+                            "vulnerability", "penetration test", "合规检查", "代码加固",
+                            "安全加固", "安全评估", "安全检测", "安全漏洞", "xss", "sql注入",
+                            "csrf", "认证绕过", "权限提升"]
+        code_keywords = ["代码", "开发", "实现", "API", "接口", "写个", "生成", "build", "create",
+                        "implement", "函数", "class", "组件", "component", "数据库表",
+                        "schema", "后端", "backend", "前端", "frontend", "react", "vue",
+                        "fastapi", "express", "next.js", "django", "flask"]
+        workflow_keywords = ["全栈", "从零", "完整项目", "full stack", "完整系统", "端到端项目"]
 
-        # 产出类型优先匹配 (text + 文件摘要 都参与, 用户带文件来时常省略关键词)
+        # ── 管道触发检测 (最高优先级) ──
+        # 全栈项目 -> 工程管道
+        if any(kw in combined_lower for kw in [
+            "完整网站", "全栈应用", "完整系统", "电商系统", "管理后台",
+            "saas", "web app", "从零构建", "完整项目", "出全套", "做全套",
+        ]):
+            return {"agent": None, "reason": "触发工程协作管道",
+                    "is_pipeline": True, "pipeline": "engineering",
+                    "task_type": "full_stack_project"}
+        # 品牌全案 -> 设计管道
+        if any(kw in combined_lower for kw in [
+            "品牌全案", "全套设计", "视觉系统", "品牌重塑", "rebranding",
+            "全套品牌", "品牌升级", "vi系统",
+        ]):
+            return {"agent": None, "reason": "触发设计协作管道",
+                    "is_pipeline": True, "pipeline": "design",
+                    "task_type": "brand_design_system"}
+        # 战略方案 -> 战略管道
+        if any(kw in combined_lower for kw in [
+            "产品战略", "技术方案", "完整方案", "技术规划书", "项目蓝图",
+        ]):
+            return {"agent": None, "reason": "触发战略协作管道",
+                    "is_pipeline": True, "pipeline": "strategy",
+                    "task_type": "strategy_proposal"}
+
+        # ── 确定性产出类型 (绕过 LLM) ──
         if has_multimodal and any(kw in combined for kw in cad_keywords):
             return {"agent": "multimodal_design_agent", "reason": "CAD 建模需求 (含图片/文件参考)",
-                    "is_multi_stage": False, "task_type": "cad_from_sketch"}
+                    "is_pipeline": False, "task_type": "cad_from_sketch"}
         if any(kw in combined for kw in web_keywords):
             return {"agent": "multimodal_design_agent", "reason": "网页生成需求",
-                    "is_multi_stage": False, "task_type": "web_page"}
+                    "is_pipeline": False, "task_type": "web_page"}
         elif any(kw in combined for kw in diagram_keywords):
             return {"agent": "multimodal_design_agent", "reason": "图表/SVG 生成需求",
-                    "is_multi_stage": False, "task_type": "svg_diagram"}
+                    "is_pipeline": False, "task_type": "svg_diagram"}
         elif any(kw in combined_lower for kw in build123d_keywords):
             return {"agent": "multimodal_design_agent", "reason": "build123d 精确建模需求",
-                    "is_multi_stage": False, "task_type": "build123d_model"}
+                    "is_pipeline": False, "task_type": "build123d_model"}
         elif any(kw in combined for kw in cad_keywords):
             return {"agent": "multimodal_design_agent", "reason": "CAD 建模需求",
-                    "is_multi_stage": False, "task_type": "cad_model"}
-        elif has_multimodal:
+                    "is_pipeline": False, "task_type": "cad_model"}
+
+        # ── 12 Agent 关键词路由 (按优先级) ──
+        if has_multimodal:
             return {"agent": "multimodal_design_agent", "reason": "包含多模态输入",
-                    "is_multi_stage": False, "task_type": "多模态分析"}
-        elif any(kw in combined for kw in workflow_keywords):
-            return {"agent": "workflow_orchestrator", "reason": "多阶段工作流",
-                    "is_multi_stage": True, "task_type": "多阶段工作流"}
-        elif any(kw in combined for kw in review_keywords):
+                    "is_pipeline": False, "task_type": "多模态分析"}
+        elif any(kw in combined_lower for kw in security_keywords):
+            return {"agent": "security_audit_agent", "reason": "安全审计需求",
+                    "is_pipeline": False, "task_type": "security_audit"}
+        elif any(kw in combined_lower for kw in brand_keywords):
+            return {"agent": "brand_creative_agent", "reason": "品牌设计需求",
+                    "is_pipeline": False, "task_type": "brand_identity"}
+        elif any(kw in combined_lower for kw in ux_keywords):
+            return {"agent": "ux_interaction_agent", "reason": "交互/UX 设计需求",
+                    "is_pipeline": False, "task_type": "interaction_design"}
+        elif any(kw in combined_lower for kw in devops_keywords):
+            return {"agent": "devops_deploy_agent", "reason": "DevOps/部署需求",
+                    "is_pipeline": False, "task_type": "devops"}
+        elif any(kw in combined_lower for kw in test_keywords):
+            return {"agent": "testing_qa_agent", "reason": "测试/QA 需求",
+                    "is_pipeline": False, "task_type": "testing"}
+        elif any(kw in combined_lower for kw in review_keywords):
             return {"agent": "code_review_agent", "reason": "代码审查需求",
-                    "is_multi_stage": False, "task_type": "代码审查"}
+                    "is_pipeline": False, "task_type": "代码审查"}
         elif any(kw in combined_lower for kw in prompt_keywords):
             return {"agent": "prompt_engineer_agent", "reason": "提示词工程需求",
-                    "is_multi_stage": False, "task_type": "prompt_design"}
+                    "is_pipeline": False, "task_type": "prompt_design"}
         elif any(kw in combined_lower for kw in architect_keywords):
             return {"agent": "project_architect_agent", "reason": "架构规划需求",
-                    "is_multi_stage": False, "task_type": "architecture_plan"}
-        elif any(kw in combined for kw in code_keywords):
+                    "is_pipeline": False, "task_type": "architecture_plan"}
+        elif any(kw in combined_lower for kw in crew_keywords):
+            return {"agent": "crew_collaboration_agent", "reason": "多角色协作需求",
+                    "is_pipeline": False, "task_type": "content_creation"}
+        elif any(kw in combined_lower for kw in knowledge_keywords):
+            return {"agent": "knowledge_rag_agent", "reason": "知识检索需求",
+                    "is_pipeline": False, "task_type": "rag_query"}
+        elif any(kw in combined for kw in workflow_keywords):
+            return {"agent": "workflow_orchestrator", "reason": "多阶段工作流",
+                    "is_pipeline": True, "pipeline": "engineering", "task_type": "多阶段工作流"}
+        elif any(kw in combined_lower for kw in code_keywords):
             return {"agent": "secure_code_agent", "reason": "代码生成需求",
-                    "is_multi_stage": False, "task_type": "代码生成"}
+                    "is_pipeline": False, "task_type": "代码生成"}
         else:
-            return {"agent": None, "reason": "直接回答", "is_multi_stage": False, "task_type": "直接回答"}
+            return {"agent": None, "reason": "直接回答", "is_pipeline": False, "task_type": "直接回答"}
 
     def _save_direct_output(self, task_type: str, result: Dict[str, Any], thread_id: str) -> Optional[str]:
         """将直接产出 (网页/SVG/CAD) 写入 preview/，返回预览路径。"""
@@ -332,7 +479,6 @@ class FederationSupervisor:
 
         content = result.get("result", result)
         if isinstance(content, dict):
-            # 提取实际内容: result 可能是 A2ATaskResponse.model_dump()
             inner = content.get("result", content)
             if isinstance(inner, dict):
                 content = inner
@@ -362,29 +508,24 @@ class FederationSupervisor:
 
     def _assess_review_need(self, agent_name: str, response: A2ATaskResponse) -> bool:
         """评估是否需要人工审查"""
-        # 高风险 Agent: 始终需要审查
-        high_risk = ["secure_code_agent", "code_review_agent", "prompt_engineer_agent", "project_architect_agent"]
+        high_risk = [
+            "secure_code_agent", "code_review_agent",
+            "security_audit_agent",  # 安全审计始终审查
+            "prompt_engineer_agent", "project_architect_agent",
+        ]
         if agent_name in high_risk:
             return True
-
-        # 失败状态: 需要人工介入
         if response.status == TaskStatus.FAILED:
             return True
-
-        # Agent 标记需要审查
         if response.requires_human_review:
             return True
-
         return False
 
     def track_workflow(self, thread_id: str, state: Dict[str, Any]):
-        """追踪工作流状态"""
         self._active_workflows[thread_id] = state
 
     def get_workflow_status(self, thread_id: str) -> Optional[Dict[str, Any]]:
-        """获取工作流状态"""
         return self._active_workflows.get(thread_id)
 
 
-# 全局单例
 supervisor = FederationSupervisor()

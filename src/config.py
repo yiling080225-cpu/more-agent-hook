@@ -32,7 +32,6 @@ def _load_ccswitch_keys() -> dict[str, str]:
                 continue
             if not token:
                 continue
-            # 标准化 URL: 去除 SDK 会自动追加的路径后缀
             if url:
                 url = url.rstrip("/")
                 for suffix in ("/v1/messages", "/v1/chat/completions", "/v1"):
@@ -77,7 +76,7 @@ for _k, _v in _CC_KEYS.items():
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
-    # === API Keys (CC-Switch 自动注入, .env 可覆盖) ===
+    # === 4 大 LLM 供应商 API Keys (CC-Switch 自动注入, .env 可覆盖) ===
     deepseek_key: str = ""
     deepseek_url: str = "https://api.deepseek.com/anthropic"
     deepseek_model: str = "deepseek-chat"
@@ -105,13 +104,28 @@ class Settings(BaseSettings):
     sqlite_path: str = "data/checkpoints.db"
     log_level: str = "INFO"
 
-    # === Agent 端口 ===
+    # === 12 Agent 端口 — 4 层架构 ===
     gateway_port: int = 8000
+
+    # 设计层 (8001-8003)
     multimodal_agent_port: int = 8001
-    code_agent_port: int = 8002
-    review_agent_port: int = 8003
-    prompt_agent_port: int = 8004
-    architect_agent_port: int = 8005
+    ux_agent_port: int = 8002
+    brand_agent_port: int = 8003
+
+    # 工程层 (8004-8007)
+    code_agent_port: int = 8004
+    test_agent_port: int = 8005
+    devops_agent_port: int = 8006
+    review_agent_port: int = 8007
+
+    # 战略层 (8008-8010)
+    architect_agent_port: int = 8008
+    prompt_agent_port: int = 8009
+    crew_agent_port: int = 8010
+
+    # 基础层 (8011-8012)
+    knowledge_agent_port: int = 8011
+    security_agent_port: int = 8012
 
     # ── 能力检测 ──
 
@@ -131,71 +145,106 @@ class Settings(BaseSettings):
     def has_gemini(self) -> bool:
         return bool(self.gemini_key)
 
-    # ── 智能路由: 根据可用供应商自动选择 endpoint + model ──
+    # ── LLM 分配策略: 每个 Agent 固定分配最佳供应商 ──
+
+    AGENT_LLM_MAP: dict[str, str] = {
+        # 设计层
+        "multimodal": "glm",     # GLM 视觉最强
+        "ux": "gpt",             # GPT 交互设计
+        "brand": "deepseek",     # DeepSeek 性价比
+        # 工程层
+        "code": "gpt",           # GPT 代码质量
+        "test": "deepseek",      # DeepSeek 批量生成
+        "devops": "deepseek",    # DeepSeek 脚本生成
+        "review": "opus",        # Opus 安全审查不能用差的
+        # 战略层
+        "architect": "opus",     # Opus 架构决策不能错
+        "prompt": "gpt",         # GPT 提示词设计
+        "crew": "gpt",           # GPT 多角色协作
+        # 基础层
+        "knowledge": "deepseek", # DeepSeek 文档处理
+        "security": "opus",      # Opus 渗透测试/合规
+        "router": "deepseek",    # 路由本身轻量
+    }
+
+    def _preferred_provider(self, agent: str) -> str:
+        """返回 Agent 的首选供应商名 (opus/gpt/glm/deepseek)"""
+        return self.AGENT_LLM_MAP.get(agent, "deepseek")
+
+    def _provider(self, provider: str) -> dict:
+        """将供应商名转为 {api_key, base_url}"""
+        if provider == "opus" and self.opus_key:
+            return {"api_key": self.opus_key, "base_url": self.opus_url}
+        if provider == "gpt" and self.gpt_key:
+            return {"api_key": self.gpt_key, "base_url": self.gpt_url}
+        if provider == "glm" and self.glm_key:
+            return {"api_key": self.glm_key, "base_url": self.glm_url}
+        if provider == "deepseek" and self.deepseek_key:
+            return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
+        return {}
 
     def client_for(self, agent: str) -> dict:
-        """返回 {api_key, base_url} — 给 AsyncAnthropic 初始化"""
-        if agent == "multimodal":
-            if self.glm_key:
-                return {"api_key": self.glm_key, "base_url": self.glm_url}
-            if self.gpt_key:
-                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
-            return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
-        if agent == "code" or agent == "router":
-            if self.deepseek_key:
-                return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
-            if self.gpt_key:
-                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
-            return {"api_key": "", "base_url": ""}
-        if agent == "review":
-            # GPT > DeepSeek > GLM (审查用最强的推理能力)
-            if self.gpt_key:
-                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
-            if self.deepseek_key:
-                return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
-            if self.glm_key:
-                return {"api_key": self.glm_key, "base_url": self.glm_url}
-            return {"api_key": "", "base_url": ""}
-        # prompt / architect: GPT 专属，后备 DeepSeek
-        if agent in ("prompt", "architect"):
-            if self.gpt_key:
-                return {"api_key": self.gpt_key, "base_url": self.gpt_url}
-            if self.deepseek_key:
-                return {"api_key": self.deepseek_key, "base_url": self.deepseek_url}
-            return {"api_key": "", "base_url": ""}
+        """返回 {api_key, base_url} — 给 AsyncAnthropic 初始化.
+
+        策略: 首选供应商不可用时自动降级.
+        降级链: Opus→GPT→DeepSeek→GLM (按推理能力排序)
+        """
+        preferred = self._preferred_provider(agent)
+        fallback_order = {
+            "opus": ["opus", "gpt", "deepseek", "glm"],
+            "gpt": ["gpt", "opus", "deepseek", "glm"],
+            "glm": ["glm", "opus", "gpt", "deepseek"],
+            "deepseek": ["deepseek", "opus", "gpt", "glm"],
+        }
+        for p in fallback_order.get(preferred, ["deepseek"]):
+            cfg = self._provider(p)
+            if cfg:
+                return cfg
         return {"api_key": "", "base_url": ""}
 
-    def model_for(self, agent: str) -> str:
-        """返回对应 Agent 应使用的模型名 (来自 CC-Switch ANTHROPIC_MODEL)"""
-        if agent == "multimodal":
-            if self.glm_key:
-                return self.glm_model
-            if self.gpt_key:
-                return self.gpt_model
+    def _model_for_provider(self, provider: str) -> str:
+        """返回供应商对应的模型名"""
+        if provider == "opus":
+            return self.opus_model
+        if provider == "gpt":
+            return self.gpt_model
+        if provider == "glm":
+            return self.glm_model
+        if provider == "deepseek":
             return self.deepseek_model
-        if agent == "code" or agent == "router":
-            if self.deepseek_key:
-                return self.deepseek_model
-            if self.gpt_key:
-                return self.gpt_model
-            return "deepseek-chat"
-        if agent == "review":
-            # GPT > DeepSeek > GLM
-            if self.gpt_key:
-                return self.gpt_model
-            if self.deepseek_key:
-                return self.deepseek_model
-            if self.glm_key:
-                return self.glm_model
-            return "deepseek-chat"
-        # prompt / architect: GPT 专属
-        if agent in ("prompt", "architect"):
-            if self.gpt_key:
-                return self.gpt_model
-            if self.deepseek_key:
-                return self.deepseek_model
-            return "deepseek-chat"
         return "deepseek-chat"
+
+    def model_for(self, agent: str) -> str:
+        """返回 Agent 应使用的模型名 (与 client_for 同降级链)"""
+        preferred = self._preferred_provider(agent)
+        fallback_order = {
+            "opus": ["opus", "gpt", "deepseek", "glm"],
+            "gpt": ["gpt", "opus", "deepseek", "glm"],
+            "glm": ["glm", "opus", "gpt", "deepseek"],
+            "deepseek": ["deepseek", "opus", "gpt", "glm"],
+        }
+        for p in fallback_order.get(preferred, ["deepseek"]):
+            if self._provider(p):
+                return self._model_for_provider(p)
+        return "deepseek-chat"
+
+    # ── 协作管道配置 ──
+
+    @property
+    def pipeline_design(self) -> list[str]:
+        """设计产出管道: 品牌→交互→视觉"""
+        return ["brand_creative_agent", "ux_interaction_agent", "multimodal_design_agent"]
+
+    @property
+    def pipeline_engineering(self) -> list[str]:
+        """工程产出管道: 架构→编码→审查→测试→部署"""
+        return ["project_architect_agent", "secure_code_agent", "code_review_agent",
+                "testing_qa_agent", "devops_deploy_agent"]
+
+    @property
+    def pipeline_strategy(self) -> list[str]:
+        """战略产出管道: 提示词设计→多角色验证→审查"""
+        return ["prompt_engineer_agent", "crew_collaboration_agent", "code_review_agent"]
 
     # ── URL 快捷属性 ──
 
@@ -204,20 +253,48 @@ class Settings(BaseSettings):
         return f"http://{self.host}:{self.multimodal_agent_port}"
 
     @property
+    def ux_agent_url(self) -> str:
+        return f"http://{self.host}:{self.ux_agent_port}"
+
+    @property
+    def brand_agent_url(self) -> str:
+        return f"http://{self.host}:{self.brand_agent_port}"
+
+    @property
     def code_agent_url(self) -> str:
         return f"http://{self.host}:{self.code_agent_port}"
+
+    @property
+    def test_agent_url(self) -> str:
+        return f"http://{self.host}:{self.test_agent_port}"
+
+    @property
+    def devops_agent_url(self) -> str:
+        return f"http://{self.host}:{self.devops_agent_port}"
 
     @property
     def review_agent_url(self) -> str:
         return f"http://{self.host}:{self.review_agent_port}"
 
     @property
+    def architect_agent_url(self) -> str:
+        return f"http://{self.host}:{self.architect_agent_port}"
+
+    @property
     def prompt_agent_url(self) -> str:
         return f"http://{self.host}:{self.prompt_agent_port}"
 
     @property
-    def architect_agent_url(self) -> str:
-        return f"http://{self.host}:{self.architect_agent_port}"
+    def crew_agent_url(self) -> str:
+        return f"http://{self.host}:{self.crew_agent_port}"
+
+    @property
+    def knowledge_agent_url(self) -> str:
+        return f"http://{self.host}:{self.knowledge_agent_port}"
+
+    @property
+    def security_agent_url(self) -> str:
+        return f"http://{self.host}:{self.security_agent_port}"
 
     @property
     def gateway_url(self) -> str:

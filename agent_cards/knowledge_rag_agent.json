@@ -1,0 +1,14 @@
+{
+  "name": "knowledge_rag_agent",
+  "description": "知识检索专家：文档解析、向量检索、上下文增强、RAG 问答",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "documents", "query"],
+    "output": ["retrieved_context", "answer", "sources", "json"],
+    "skills": ["document_parsing", "vector_retrieval", "context_injection", "rag_qa", "knowledge_graph", "semantic_search"]
+  },
+  "endpoint": "http://127.0.0.1:8011/a2a",
+  "mcp_servers": [],
+  "model": "deepseek-chat",
+  "max_context_tokens": 128000
+}

@@ -1,0 +1,14 @@
+{
+  "name": "brand_creative_agent",
+  "description": "品牌创意设计专家：品牌视觉系统、色彩搭配、字体规范、视觉识别",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "brand_brief", "references"],
+    "output": ["brand_guide", "design_tokens", "json"],
+    "skills": ["brand_identity", "color_system", "typography", "visual_hierarchy", "design_tokens", "style_guide"]
+  },
+  "endpoint": "http://127.0.0.1:8003/a2a",
+  "mcp_servers": [],
+  "model": "deepseek-chat",
+  "max_context_tokens": 128000
+}

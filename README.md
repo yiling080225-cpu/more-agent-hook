@@ -1,8 +1,8 @@
-# 多模态 Agent 联邦 MVP
+# 多模态 Agent 联邦 — 12 Agent 四层架构
 
-> **哪个 Agent 能力强就用哪个** — 本地可运行的 Agent Federation 最小可行产品
+> **哪个 Agent 能力强就用哪个** — 本地可运行的 Agent Federation
 
-5 个协作 AI Agent（多模态设计 / 安全代码生成 / 代码审查 / 提示词工程 / 项目架构）通过 Gateway 统一调度，支持 LangGraph 工作流编排、A2A 协议通信、MCP 工具集成。
+12 个协作 AI Agent 分为 4 层（设计/工程/战略/基础），通过 Gateway 统一调度，支持 LangGraph 工作流编排、A2A 协议通信、MCP 工具集成、3 条协作管道。
 
 ---
 
@@ -20,21 +20,18 @@ cp .env.example .env
 # 3. 校验配置
 python validate_setup.py
 
-# 4. 启动全部服务 (Gateway + 5 Agent)
+# 4. 启动全部服务 (Gateway + 12 Agent)
 python run.py
+
+# 按层启动 (节省资源)
+python run.py --layer design        # 设计层 (3 Agent)
+python run.py --layer engineering   # 工程层 (4 Agent)
+python run.py --layer strategy      # 战略层 (3 Agent)
+python run.py --layer foundation    # 基础层 (2 Agent)
 
 # 5. 浏览器打开 Dashboard
 # http://127.0.0.1:8000/dashboard
 ```
-
-### 支持的 API 供应商
-
-| 供应商 | 环境变量 | 获取地址 |
-|--------|---------|---------|
-| DeepSeek (推荐) | `DEEPSEEK_KEY` | platform.deepseek.com |
-| 智谱 GLM | `GLM_KEY` | open.bigmodel.cn |
-| Gemini | `GEMINI_KEY` | aistudio.google.com |
-| GPT / Opus (代理) | `GPT_KEY` / `OPUS_KEY` | 需配置代理 URL |
 
 ---
 
@@ -43,132 +40,103 @@ python run.py
 ```
 用户输入 (Dashboard / API / CLI)
         |
-[Gateway :8000] — 总调度 + A2A 路由 + 工作流控制
-   |     |     |     |     |
-   | A2A | A2A | A2A | A2A | A2A
-   v     v     v     v     v
-[Multi] [Code] [Review] [Prompt] [Architect]
- :8001  :8002   :8003    :8004     :8005
+[Gateway :8000] — 智能路由 + A2A 调度 + 协作管道编排 + 工作流控制
+   |    |    |    |    |    |    |    |    |    |    |    |
+   v    v    v    v    v    v    v    v    v    v    v    v
 
-LangGraph 工作流:
-  需求解析 -> 多模态分析 -> 人工审批 -> 代码生成 -> 审查 -> 完成
-                  ↑ Checkpoint (SQLite) ↑ 断点恢复
+  [设计层 8001-8003]    [工程层 8004-8007]    [战略层 8008-8010]   [基础层 8011-8012]
+  Multimodal :8001      Code      :8004       Architect :8008      Knowledge :8011
+  UX         :8002      Test      :8005       Prompt    :8009      Security  :8012
+  Brand      :8003      DevOps    :8006       Crew      :8010
+                        Review    :8007
 ```
 
-## 5 个核心 Agent
+## 12 Agent 详表
 
-| Agent | 端口 | 能力 | 默认模型 |
-|-------|------|------|------|
-| **Multimodal** | 8001 | 图像理解、UI 设计规范生成、网页/SVG/CAD 产出 | deepseek-chat |
-| **Code** | 8002 | 前端/后端代码生成、API 设计 | deepseek-chat |
-| **Review** | 8003 | 多轮代码审查、安全漏洞检测 | deepseek-chat |
-| **Prompt Engineer** | 8004 | 提示词设计/调试/优化、A/B 测试 | deepseek-chat |
-| **Project Architect** | 8005 | 架构规划、技术选型、系统设计 | deepseek-chat |
+### 设计层 (8001-8003)
 
-所有模型可通过 `.env` 文件中的 `*_MODEL` 变量自由替换。
+| Agent | 端口 | LLM | 职责 |
+|-------|------|-----|------|
+| **Multimodal Design** | 8001 | GLM | 图像理解、UI设计规范、网页/SVG/CAD产出 |
+| **UX/Interaction** | 8002 | GPT | 交互设计、动效设计、可用性分析、线框图 |
+| **Brand/Creative** | 8003 | DeepSeek | 品牌视觉系统、色彩/字体、设计Token |
+
+### 工程层 (8004-8007)
+
+| Agent | 端口 | LLM | 职责 |
+|-------|------|-----|------|
+| **Secure Code** | 8004 | GPT | 前端/后端代码、API设计、类型安全 |
+| **Testing/QA** | 8005 | DeepSeek | 测试用例、自动化测试、覆盖率 |
+| **DevOps/Deploy** | 8006 | DeepSeek | CI/CD、Docker/K8s、部署脚本 |
+| **Code Review** | 8007 | **Opus** | 安全审查、多轮辩论、漏洞检测 |
+
+### 战略层 (8008-8010)
+
+| Agent | 端口 | LLM | 职责 |
+|-------|------|-----|------|
+| **Project Architect** | 8008 | **Opus** | 架构规划、技术选型、系统设计 |
+| **Prompt Engineer** | 8009 | GPT | 提示词设计/调试/优化/A/B测试 |
+| **Crew Collaboration** | 8010 | GPT | 多角色协作、内容文案、市场分析 |
+
+### 基础层 (8011-8012)
+
+| Agent | 端口 | LLM | 职责 |
+|-------|------|-----|------|
+| **Knowledge/RAG** | 8011 | DeepSeek | 文档解析、向量检索、RAG问答 |
+| **Security Audit** | 8012 | **Opus** | 渗透测试、OWASP扫描、合规检查 |
+
+---
+
+## 协作管道
+
+复杂任务自动触发多 Agent 顺序协作：
+
+| 管道 | Agent 链 | 触发条件 |
+|------|---------|---------|
+| **设计** | Brand → UX → Multimodal | 品牌全案、视觉系统 |
+| **工程** | Architect → Code → Review → Test → DevOps | 全栈项目、完整系统 |
+| **战略** | Prompt → Crew → Review | 产品战略、技术方案 |
+
+普通请求仍只走 1 个 Agent，不影响成本。
 
 ## API 文档
 
-启动后访问 http://127.0.0.1:8000/docs 查看完整的 Swagger API 文档。
-
-### 关键端点
+启动后访问 http://127.0.0.1:8000/docs
 
 ```bash
 # 健康检查
 curl http://127.0.0.1:8000/health
 
-# 列出所有 Agent
+# 列出 12 Agent
 curl http://127.0.0.1:8000/agents
-
-# 智能路由分析 (不执行)
-curl -X POST http://127.0.0.1:8000/supervisor/route \
-  -H "Content-Type: application/json" \
-  -d '{"text": "帮我生成一个用户登录的API接口"}'
 
 # 路由并执行
 curl -X POST http://127.0.0.1:8000/supervisor/execute \
   -H "Content-Type: application/json" \
-  -d '{"text": "审查这段代码: eval(user_input)"}'
-
-# 启动完整工作流
-curl -X POST http://127.0.0.1:8000/workflow/start \
-  -H "Content-Type: application/json" \
-  -d '{"input": {"text": "做一个电商网站，需要商品展示和购物车"}}'
+  -d '{"text": "帮我设计一个电商网站的品牌视觉系统"}'
 ```
-
----
 
 ## CLI 客户端
 
 ```bash
-# 对话模式
-python fedcli.py
-
-# 命令行模式
-python fedcli.py system              # 系统状态
-python fedcli.py estimate "做个登录页"  # 预估费用
-python fedcli.py new "做个登录页"       # 提交任务
-python fedcli.py status               # 查看任务列表
-```
-
----
-
-## 项目结构
-
-```
-├── run.py                          # 统一启动入口
-├── fedcli.py / fedcli_gui.py       # CLI / GUI 客户端
-├── pyproject.toml                   # 项目配置 (pip install -e .)
-├── requirements.txt                # Python 依赖
-├── Dockerfile / docker-compose.yml # 容器化部署
-├── .env.example                    # 环境配置模板
-├── mcp_config.yaml                 # MCP 工具配置
-├── agent_cards/                    # 5 个 Agent Card (JSON)
-├── src/
-│   ├── config.py                   # 配置管理
-│   ├── api/       (routes, schemas)
-│   ├── agents/    (base, multimodal, code, review, prompt, architect)
-│   ├── gateway/   (supervisor, registry, a2a_client)
-│   ├── workflow/  (ecommerce_workflow, checkpoint)
-│   ├── mcp/       (registry, tools/)
-│   └── ui/        (dashboard.html)
-├── federation_sdk/                 # Python SDK
-└── tests/                          # 测试用例
-```
-
-## MVP 简化说明
-
-| 原始方案 | MVP 实现 |
-|---------|---------|
-| 8 Agent (GCP 部署) | 5 Agent (本地多端口) |
-| Firestore Checkpoint | SQLite Checkpoint |
-| Cloud Run / GKE | 单进程 asyncio |
-| 11 个外部 MCP Server | 6 个内置工具 |
-| A2A gRPC + HTTP | HTTP REST A2A |
-| Gemini + Claude + GPT | DeepSeek (Anthropic 兼容) |
-
-## 运行测试
-
-```bash
-pip install -e ".[test]"
-pytest tests/ -v
+python fedcli.py                          # 对话模式
+python fedcli.py new "做个登录页"          # 提交任务
+python fedcli.py system                   # 系统状态
 ```
 
 ## 部署 (Docker)
 
 ```bash
 cp .env.example .env
-# 编辑 .env 填入 API Key
 docker-compose up -d
-# Dashboard: http://localhost:8000/dashboard
 ```
 
 ## 环境要求
 
 - Python 3.11+
-- DeepSeek API Key（或其他 Anthropic 兼容供应商）
-- 可选：Gemini API Key（多模态理解）、GLM API Key（视觉能力）
+- 至少 1 个 API Key（DeepSeek 推荐）
+- 可选：GLM Key（视觉）、GPT Key（代码设计）、Opus Key（安全/架构）
 
 ---
 
-**版本**: 1.0.0-mvp | **许可**: MIT
+**版本**: 2.0.0 | **许可**: MIT

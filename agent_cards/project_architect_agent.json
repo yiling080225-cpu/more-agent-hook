@@ -14,8 +14,8 @@
       "tradeoff_analysis"
     ]
   },
-  "endpoint": "http://127.0.0.1:8005/a2a",
+  "endpoint": "http://127.0.0.1:8008/a2a",
   "mcp_servers": [],
-  "model": "gpt-5.5",
+  "model": "claude-opus-4-7",
   "max_context_tokens": 128000
 }

@@ -56,21 +56,27 @@ PROMPT_SYSTEM_PROMPT = """你是一个世界级提示词工程师。你的任务
     "suggested_model": "推荐使用的模型"
 }"""
 
-# 任务分配: design/debug/optimize -> GPT (强推理), test -> DeepSeek (性价比)
+# 任务分配: design/debug/optimize -> Opus > GPT, test -> DeepSeek (性价比)
 TASK_MODEL_MAP = {
-    "prompt_design": "gpt",
-    "prompt_debug": "gpt",
-    "prompt_optimize": "gpt",
+    "prompt_design": "opus",
+    "prompt_debug": "opus",
+    "prompt_optimize": "opus",
     "prompt_test": "deepseek",
 }
 
 
 class PromptAgent(BaseAgent):
-    """提示词工程师 Agent — GPT + DeepSeek 双引擎"""
+    """提示词工程师 Agent — Opus + GPT + DeepSeek 三引擎"""
 
     def __init__(self):
         super().__init__(card=PROMPT_AGENT_CARD)
         from anthropic import AsyncAnthropic
+
+        self.opus_client = None
+        self.opus_model = None
+        if settings.opus_key:
+            self.opus_client = AsyncAnthropic(api_key=settings.opus_key, base_url=settings.opus_url)
+            self.opus_model = settings.opus_model
 
         self.gpt_client = None
         self.gpt_model = None
@@ -85,7 +91,11 @@ class PromptAgent(BaseAgent):
             self.ds_model = settings.deepseek_model
 
     def _pick(self, task_type: str):
-        use = TASK_MODEL_MAP.get(task_type, "gpt")
+        use = TASK_MODEL_MAP.get(task_type, "opus")
+        if use == "opus" and self.opus_client:
+            return self.opus_client, self.opus_model, "opus"
+        if use == "opus" and self.gpt_client:
+            return self.gpt_client, self.gpt_model, "gpt"
         if use == "gpt" and self.gpt_client:
             return self.gpt_client, self.gpt_model, "gpt"
         if self.ds_client:

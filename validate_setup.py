@@ -72,6 +72,16 @@ def main():
         print(f"  [WARN] .env 文件不存在，将使用默认值（不含 API Key）")
         print(f"         运行: cp .env.example .env")
 
+    # 6. 12 Agent Card 文件
+    cards_dir = Path("agent_cards")
+    if cards_dir.exists():
+        cards = list(cards_dir.glob("*.json"))
+        print(f"  [PASS] Agent Cards: {len(cards)} 个")
+        if len(cards) < 12:
+            print(f"  [WARN] 预期 12 个 Agent Card，当前只有 {len(cards)} 个")
+    else:
+        print(f"  [WARN] agent_cards/ 目录不存在")
+
     if all_ok:
         print("\n  校验通过，运行 python run.py 启动服务")
     else:

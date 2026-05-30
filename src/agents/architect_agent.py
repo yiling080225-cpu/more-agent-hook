@@ -66,23 +66,29 @@ ARCHITECT_SYSTEM_PROMPT = """你是一个资深项目架构师和技术规划专
     "tradeoffs": "关键权衡说明"
 }"""
 
-# 任务分配: architecture_plan/system_design/framework_design/module_plan -> GPT (强推理)
+# 任务分配: architecture_plan/system_design/framework_design/module_plan -> Opus (最强推理)
 #           tech_stack -> DeepSeek (性价比)
 TASK_MODEL_MAP = {
-    "architecture_plan": "gpt",
-    "system_design": "gpt",
-    "framework_design": "gpt",
-    "module_plan": "gpt",
+    "architecture_plan": "opus",
+    "system_design": "opus",
+    "framework_design": "opus",
+    "module_plan": "opus",
     "tech_stack": "deepseek",
 }
 
 
 class ArchitectAgent(BaseAgent):
-    """项目框架规划师 Agent — GPT + DeepSeek 双引擎"""
+    """项目框架规划师 Agent — Opus + GPT + DeepSeek 三引擎"""
 
     def __init__(self):
         super().__init__(card=ARCHITECT_AGENT_CARD)
         from anthropic import AsyncAnthropic
+
+        self.opus_client = None
+        self.opus_model = None
+        if settings.opus_key:
+            self.opus_client = AsyncAnthropic(api_key=settings.opus_key, base_url=settings.opus_url)
+            self.opus_model = settings.opus_model
 
         self.gpt_client = None
         self.gpt_model = None
@@ -97,7 +103,11 @@ class ArchitectAgent(BaseAgent):
             self.ds_model = settings.deepseek_model
 
     def _pick(self, task_type: str):
-        use = TASK_MODEL_MAP.get(task_type, "gpt")
+        use = TASK_MODEL_MAP.get(task_type, "opus")
+        if use == "opus" and self.opus_client:
+            return self.opus_client, self.opus_model, "opus"
+        if use == "opus" and self.gpt_client:
+            return self.gpt_client, self.gpt_model, "gpt"
         if use == "gpt" and self.gpt_client:
             return self.gpt_client, self.gpt_model, "gpt"
         if self.ds_client:

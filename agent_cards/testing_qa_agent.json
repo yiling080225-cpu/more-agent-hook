@@ -1,0 +1,14 @@
+{
+  "name": "testing_qa_agent",
+  "description": "测试与质量保障专家：测试用例生成、自动化测试、边界条件检测、覆盖率分析",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "code", "spec"],
+    "output": ["test_code", "test_report", "json"],
+    "skills": ["unit_test_generation", "integration_test", "e2e_test", "boundary_analysis", "coverage_optimization", "regression_test"]
+  },
+  "endpoint": "http://127.0.0.1:8005/a2a",
+  "mcp_servers": [],
+  "model": "deepseek-chat",
+  "max_context_tokens": 128000
+}

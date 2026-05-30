@@ -1,0 +1,14 @@
+{
+  "name": "ux_interaction_agent",
+  "description": "交互设计与用户体验专家：动效设计、可用性分析、用户旅程、交互原型",
+  "version": "1.0.0",
+  "capabilities": {
+    "input": ["text", "requirements", "design_spec"],
+    "output": ["interaction_spec", "animation_code", "json"],
+    "skills": ["interaction_design", "usability_analysis", "user_journey", "motion_design", "accessibility_audit", "wireframe_generation"]
+  },
+  "endpoint": "http://127.0.0.1:8002/a2a",
+  "mcp_servers": [],
+  "model": "gpt-5.5",
+  "max_context_tokens": 128000
+}

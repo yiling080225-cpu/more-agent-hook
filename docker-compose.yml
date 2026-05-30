@@ -6,11 +6,18 @@ services:
     container_name: agent-federation-mvp
     ports:
       - "8000:8000"   # Gateway + Dashboard
-      - "8001:8001"   # Multimodal Agent
-      - "8002:8002"   # Code Agent
-      - "8003:8003"   # Review Agent
-      - "8004:8004"   # Prompt Engineer Agent
-      - "8005:8005"   # Project Architect Agent
+      - "8001:8001"   # Multimodal Design Agent
+      - "8002:8002"   # UX/Interaction Agent
+      - "8003:8003"   # Brand/Creative Agent
+      - "8004:8004"   # Secure Code Agent
+      - "8005:8005"   # Testing/QA Agent
+      - "8006:8006"   # DevOps/Deploy Agent
+      - "8007:8007"   # Code Review Agent
+      - "8008:8008"   # Project Architect Agent
+      - "8009:8009"   # Prompt Engineer Agent
+      - "8010:8010"   # Crew Collaboration Agent
+      - "8011:8011"   # Knowledge/RAG Agent
+      - "8012:8012"   # Security Audit Agent
     env_file:
       - .env
     volumes:
