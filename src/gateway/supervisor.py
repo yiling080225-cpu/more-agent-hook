@@ -270,12 +270,13 @@ class FederationSupervisor:
             extra_parts.append(f"[文件内容摘要]\n{snippet}\n[/文件内容摘要]")
         extra = " " + " ".join(extra_parts) if extra_parts else ""
 
-        # 策略 0: 关键词优先 (确定性产出类型, 绕过 LLM 避免误判)
+        # 策略 0: 关键词优先 (确定性产出类型 + 管道触发, 绕过 LLM 避免误判)
         kw = self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
         if kw.get("task_type") in (
             "web_page", "svg_diagram", "cad_model", "cad_from_sketch", "build123d_model",
             "security_audit", "brand_identity", "testing", "devops",
-        ):
+            "full_stack_project", "brand_design_system", "strategy_proposal",
+        ) or kw.get("is_pipeline"):
             return kw
 
         # 策略 1: Gemini 路由
