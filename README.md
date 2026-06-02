@@ -1,8 +1,8 @@
-# 多模态 Agent 联邦 — 12 Agent 四层架构
+# 多模态 Agent 联邦 — 12 Agent 四层架构 + 13步全流程工作流
 
 > **哪个 Agent 能力强就用哪个** — 本地可运行的 Agent Federation
 
-12 个协作 AI Agent 分为 4 层（设计/工程/战略/基础），通过 Gateway 统一调度，支持 LangGraph 工作流编排、A2A 协议通信、MCP 工具集成、3 条协作管道。
+12 个协作 AI Agent 分为 4 层（设计/工程/战略/基础），通过 Gateway 统一调度。支持 13 步 LangGraph 全流程工作流（需求→交付）、3 条协作管道、Sub-Agent 并行编排、4 个人工审批检查点、A2A 协议通信。
 
 ---
 
@@ -15,40 +15,43 @@ pip install -e .
 # 2. 配置 API Key
 cp .env.example .env
 # 编辑 .env，至少填入 DEEPSEEK_KEY
-# 免费获取: https://platform.deepseek.com/api_keys
 
 # 3. 校验配置
 python validate_setup.py
 
 # 4. 启动全部服务 (Gateway + 12 Agent)
 python run.py
-
-# 按层启动 (节省资源)
-python run.py --layer design        # 设计层 (3 Agent)
-python run.py --layer engineering   # 工程层 (4 Agent)
-python run.py --layer strategy      # 战略层 (3 Agent)
-python run.py --layer foundation    # 基础层 (2 Agent)
-
-# 5. 浏览器打开 Dashboard
-# http://127.0.0.1:8000/dashboard
 ```
+
+浏览器打开 http://127.0.0.1:8000/docs 查看 API 文档。
 
 ---
 
 ## 架构概览
 
 ```
-用户输入 (Dashboard / API / CLI)
-        |
-[Gateway :8000] — 智能路由 + A2A 调度 + 协作管道编排 + 工作流控制
-   |    |    |    |    |    |    |    |    |    |    |    |
-   v    v    v    v    v    v    v    v    v    v    v    v
-
-  [设计层 8001-8003]    [工程层 8004-8007]    [战略层 8008-8010]   [基础层 8011-8012]
-  Multimodal :8001      Code      :8004       Architect :8008      Knowledge :8011
-  UX         :8002      Test      :8005       Prompt    :8009      Security  :8012
-  Brand      :8003      DevOps    :8006       Crew      :8010
-                        Review    :8007
+Claude Code (Sub-Agent 编排层)
+  ├─ Agent("office-hours")  → 步骤1 需求调研
+  ├─ Agent("general-purpose") → 步骤2-5 设计
+  └─ Agent("general-purpose") → 步骤6-13 开发交付
+         │ FederationClient SDK
+         ▼
+[Gateway :8000] — 路由 + A2A 调度 + 管道编排 + LangGraph 工作流
+   │    │    │    │    │    │    │    │    │    │    │    │
+   ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼
+[设计层 8001-8003]  [工程层 8004-8007]  [战略层 8008-8010] [基础层 8011-8012]
+ Multimodal :8001    Code      :8004     Architect :8008    Knowledge :8011
+ UX         :8002    Test      :8005     Prompt    :8009    Security  :8012
+ Brand      :8003    DevOps    :8006     Crew      :8010
+                     Review    :8007
+         │                       │
+         └─────── A2A ───────────┘
+         │
+    [LangGraph 工作流引擎]
+     ├─ 13步全流程 (需求→交付)
+     ├─ 3组并行执行
+     ├─ 4个人工审批点
+     └─ SQLite Checkpoint 断点恢复
 ```
 
 ## 12 Agent 详表
@@ -87,21 +90,113 @@ python run.py --layer foundation    # 基础层 (2 Agent)
 
 ---
 
-## 协作管道
+## 13步全流程工作流 (LangGraph)
 
-复杂任务自动触发多 Agent 顺序协作：
+触发关键词: **全流程 / 端到端 / 从需求到交付 / 一条龙**
+
+```
+步骤1: 需求调研 [Crew] ──→ 步骤2: 需求文档 [Prompt]
+                              │
+                    [审批点1: PRD确认]
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+    步骤3: 原型设计      步骤4: 可行性评估    步骤5: 技术选型
+    [UX]                [Architect]          [Architect]
+          └───────────────────┼───────────────────┘
+                              ▼
+                    步骤6: 架构设计 [Architect]
+                              │
+                    [审批点2: 架构确认]
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+              步骤7: 数据库设计    步骤8: 接口文档
+              [Code]              [Code]
+                    └─────────┬─────────┘
+                              ▼
+                    步骤9: 编码开发 [Code]
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+              步骤10: 代码审查    步骤11: 测试验证
+              [Review]           [Test]
+                    └─────────┬─────────┘
+                              ▼
+                    [审批点3: 质量确认]
+                              │
+                              ▼
+                    步骤12: 部署上线 [DevOps]
+                              │
+                              ▼
+                    步骤13: 验收交付 [Crew + Knowledge]
+                              │
+                    [审批点4: 最终验收]
+```
+
+### 特性
+
+| 特性 | 说明 |
+|------|------|
+| **3组并行** | 步骤3-5(设计)∥步骤7-8(DB/API)∥步骤10-11(审查/测试) |
+| **4个审批点** | PRD→架构→质量→验收，每步可 approve/reject/modify |
+| **断点恢复** | SQLite Checkpoint，工作流中断后从断点继续 |
+| **步骤1联动** | office-hours skill 做 YC 风格需求脑暴 |
+| **两步降级** | LangGraph 不可用时 → Supervisor 并行管道 |
+
+### 全流程 API
+
+```bash
+# 启动全流程工作流
+curl -X POST http://127.0.0.1:8000/full-flow/start \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"text": "做一个在线教育平台"}}'
+
+# 查询工作流状态 (含各步骤完成情况)
+curl http://127.0.0.1:8000/full-flow/{thread_id}/status
+
+# 获取审批上下文
+curl http://127.0.0.1:8000/full-flow/{thread_id}/approval-context
+
+# 审批通过/驳回/修改
+curl -X POST http://127.0.0.1:8000/full-flow/{thread_id}/resume \
+  -H "Content-Type: application/json" \
+  -d '{"decision": "approve"}'
+
+# 列出所有全流程工作流
+curl http://127.0.0.1:8000/full-flows
+```
+
+---
+
+## 协作管道
 
 | 管道 | Agent 链 | 触发条件 |
 |------|---------|---------|
 | **设计** | Brand → UX → Multimodal | 品牌全案、视觉系统 |
 | **工程** | Architect → Code → Review → Test → DevOps | 全栈项目、完整系统 |
 | **战略** | Prompt → Crew → Review | 产品战略、技术方案 |
+| **全流程** | 13步 LangGraph 工作流 | 全流程/端到端/从需求到交付 |
 
-普通请求仍只走 1 个 Agent，不影响成本。
+管道支持嵌套列表: 扁平列表顺序执行，嵌套列表组内 `asyncio.gather` 并行。
 
-## API 文档
+---
 
-启动后访问 http://127.0.0.1:8000/docs
+## Sub-Agent 两层编排
+
+| 层级 | 职责 | 技术 |
+|------|------|------|
+| **第1层: Claude Code** | 高层并行编排，独立步骤用 `Agent` 工具并行分派 | Claude Code Agent |
+| **第2层: Agent Federation** | 底层执行，12 专项 Agent + LangGraph 工作流 | A2A + LangGraph |
+
+Claude Code 端通过 `agent-federation` skill 自动识别任务类型，选择执行模式：
+- "全流程" → LangGraph 工作流（步骤1 office-hours + 后端 full-flow）
+- 复杂多步 → Sub-Agent 并行编排
+- 简单任务 → Gateway 单 Agent 路由
+
+---
+
+## 通用 API
 
 ```bash
 # 健康检查
@@ -114,6 +209,12 @@ curl http://127.0.0.1:8000/agents
 curl -X POST http://127.0.0.1:8000/supervisor/execute \
   -H "Content-Type: application/json" \
   -d '{"text": "帮我设计一个电商网站的品牌视觉系统"}'
+
+# Token 用量统计
+curl http://127.0.0.1:8000/system/tokens
+
+# 系统诊断
+curl http://127.0.0.1:8000/system/diagnostics
 ```
 
 ## CLI 客户端
@@ -124,11 +225,23 @@ python fedcli.py new "做个登录页"          # 提交任务
 python fedcli.py system                   # 系统状态
 ```
 
-## 部署 (Docker)
+## FederationClient SDK
 
-```bash
-cp .env.example .env
-docker-compose up -d
+```python
+from federation_sdk import FederationClient
+client = FederationClient(base_url='http://127.0.0.1:8000')
+
+# 单 Agent 执行
+result = client.execute(text="做一个登录页面")
+
+# 带偏好设置
+result = client.execute(
+    text="做一个Dashboard",
+    style="现代极简",
+    theme="暗色",
+    output_format="html",
+    files=["需求文档.pdf"],
+)
 ```
 
 ## 环境要求
@@ -139,4 +252,4 @@ docker-compose up -d
 
 ---
 
-**版本**: 2.0.0 | **许可**: MIT
+**版本**: 3.0.0 | **许可**: MIT
