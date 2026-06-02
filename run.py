@@ -51,6 +51,66 @@ structlog.configure(
 logger = structlog.get_logger()
 
 
+async def check_llm_connectivity() -> dict:
+    """启动前诊断: 检查各 LLM 供应商连通性，失败不阻塞启动但给出明确警告。"""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from src.config import settings
+    from anthropic import AsyncAnthropic
+    from src.utils._content import extract_text
+
+    results = {}
+    providers_to_check = [
+        ("deepseek", settings.deepseek_key, settings.deepseek_url, settings.deepseek_model),
+        ("glm", settings.glm_key, settings.glm_url, settings.glm_model),
+        ("gpt", settings.gpt_key, settings.gpt_url, settings.gpt_model),
+        ("opus", settings.opus_key, settings.opus_url, settings.opus_model),
+    ]
+
+    for name, key, url, model in providers_to_check:
+        if not key:
+            results[name] = {"status": "SKIPPED", "reason": "no API key"}
+            logger.warning(f"llm_check_{name}", status="skipped", reason="no API key")
+            continue
+        try:
+            client = AsyncAnthropic(api_key=key, base_url=url)
+            resp = await client.messages.create(
+                model=model, max_tokens=10,
+                messages=[{"role": "user", "content": "ping"}],
+            )
+            text = extract_text(resp.content)
+            tokens = resp.usage.input_tokens + resp.usage.output_tokens
+            results[name] = {"status": "OK", "response": text[:50], "tokens": tokens}
+            logger.info(f"llm_check_{name}", status="OK", response=text[:30], tokens=tokens)
+        except Exception as e:
+            results[name] = {"status": "FAIL", "error": str(e)[:200]}
+            logger.error(f"llm_check_{name}", status="FAIL", error=str(e)[:200])
+
+    return results
+
+
+def print_diagnostics(results: dict):
+    """打印启动诊断结果"""
+    print("\n  [LLM Connectivity Check]")
+    all_ok = True
+    for name, r in results.items():
+        status = r.get("status", "?")
+        icon = "[OK]" if status == "OK" else ("[FAIL]" if status == "FAIL" else "[SKIP]")
+        if status == "OK":
+            detail = f"-> {r.get('response', '')[:30]} ({r.get('tokens', 0)} tokens)"
+        elif status == "SKIPPED":
+            detail = f"-> {r.get('reason', '')}"
+        else:
+            detail = f"-> {r.get('error', '')[:80]}"
+            all_ok = False
+        print(f"    {icon} {name:<12} {detail}")
+    if not all_ok:
+        print("\n  WARNING: Some LLM providers unavailable, agents will fallback")
+    else:
+        print("    All providers connected.")
+    print()
+
+
 def create_agent_app(agent_class, name: str, port: int):
     """为 Agent 创建独立的 FastAPI 应用"""
     from fastapi import FastAPI, Request
@@ -183,6 +243,10 @@ def main():
     print("  多模态 Agent 联邦 v2.0 — 12 Agent 四层架构")
     print("  Agent Federation — 哪个 Agent 能力强就用哪个")
     print("=" * 65)
+
+    # 启动前 LLM 连通性诊断
+    diag_results = asyncio.run(check_llm_connectivity())
+    print_diagnostics(diag_results)
 
     if args.agents or args.layer:
         layer_info = f" ({args.layer} 层)" if args.layer else ""

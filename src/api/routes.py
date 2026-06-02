@@ -5,6 +5,7 @@ import structlog
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,7 +26,9 @@ from ..gateway.registry import agent_registry
 from ..gateway.supervisor import supervisor
 from ..gateway.a2a_client import a2a_client
 from ..workflow.ecommerce_workflow import workflow_runner
+from ..workflow.full_flow_workflow import full_flow_runner
 from ..mcp.registry import mcp_registry
+from ..monitoring.token_tracker import token_tracker
 
 logger = structlog.get_logger()
 
@@ -135,6 +138,59 @@ async def list_workflows():
     return {"workflows": workflow_runner.list_workflows()}
 
 
+# ==================== 全流程工作流 API (13步) ====================
+
+class FullFlowStartRequest(BaseModel):
+    """全流程工作流启动请求"""
+    input: UserInput
+    thread_id: Optional[str] = None
+    office_hours_result: Optional[Dict[str, Any]] = None  # office-hours 前置调研结果
+
+
+@router.post("/full-flow/start")
+async def start_full_flow(request: FullFlowStartRequest):
+    """启动13步全流程工作流 (带 Checkpoint + 审批)"""
+    logger.info("full_flow_start_api", text=request.input.text[:100])
+    result = await full_flow_runner.start(
+        user_input=request.input,
+        thread_id=request.thread_id,
+        office_hours_result=request.office_hours_result,
+    )
+    return result
+
+
+@router.get("/full-flow/{thread_id}/status")
+async def full_flow_status(thread_id: str):
+    """查询全流程工作流状态 (含步骤完成情况)"""
+    status = full_flow_runner.get_status(thread_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="全流程工作流未找到")
+    return status
+
+
+@router.get("/full-flow/{thread_id}/approval-context")
+async def full_flow_approval_context(thread_id: str):
+    """获取当前审批节点的上下文 (供 Claude Code 端向用户展示)"""
+    ctx = full_flow_runner.get_approval_context(thread_id)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="没有待审批的节点")
+    return ctx
+
+
+@router.post("/full-flow/{thread_id}/resume")
+async def resume_full_flow(thread_id: str, approval: HumanReviewResponse):
+    """人工审批后恢复全流程工作流"""
+    logger.info("full_flow_resume_api", thread_id=thread_id, decision=approval.decision)
+    result = await full_flow_runner.resume(thread_id, approval.model_dump())
+    return result
+
+
+@router.get("/full-flows")
+async def list_full_flows():
+    """列出所有全流程工作流"""
+    return {"workflows": full_flow_runner.list_workflows()}
+
+
 # ==================== Agent 管理 API ====================
 
 @router.get("/agents")
@@ -227,6 +283,35 @@ async def system_info():
         "mcp_tools": len(mcp_registry.list_tools()),
         "active_workflows": len(workflow_runner._active_runs),
     }
+
+
+@router.get("/system/tokens")
+async def token_usage():
+    """全局 Token 用量统计"""
+    return token_tracker.summary()
+
+
+@router.get("/system/diagnostics")
+async def system_diagnostics():
+    """系统连通性诊断 — 检查各 LLM 供应商是否可达"""
+    from ..config import _CCSWITCH_DB
+    provider_configs = {
+        "deepseek": {"key": settings.deepseek_key, "url": settings.deepseek_url, "model": settings.deepseek_model},
+        "glm":      {"key": settings.glm_key,      "url": settings.glm_url,      "model": settings.glm_model},
+        "gpt":      {"key": settings.gpt_key,      "url": settings.gpt_url,      "model": settings.gpt_model},
+        "opus":     {"key": settings.opus_key,     "url": settings.opus_url,     "model": settings.opus_model},
+    }
+    diag = {
+        "cc_switch_db": str(_CCSWITCH_DB),
+        "cc_switch_exists": _CCSWITCH_DB.exists(),
+        "providers": {
+            name: {"has_key": bool(cfg["key"]), "base_url": cfg["url"], "model": cfg["model"]}
+            for name, cfg in provider_configs.items()
+        },
+        "agents_registered": len(agent_registry.list_all()),
+        "token_summary": token_tracker.summary(),
+    }
+    return diag
 
 
 # ==================== App 工厂 ====================

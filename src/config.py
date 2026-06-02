@@ -79,19 +79,19 @@ class Settings(BaseSettings):
     # === 4 大 LLM 供应商 API Keys (CC-Switch 自动注入, .env 可覆盖) ===
     deepseek_key: str = ""
     deepseek_url: str = "https://api.deepseek.com/anthropic"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-pro[1m]"
 
     glm_key: str = ""
     glm_url: str = "https://open.bigmodel.cn/api/anthropic"
     glm_model: str = "glm-4.6V"
 
     gpt_key: str = ""
-    gpt_url: str = ""
+    gpt_url: str = "https://shiyunapi.com/v1/chat/completions"
     gpt_model: str = "gpt-5.5"
 
     opus_key: str = ""
-    opus_url: str = ""
-    opus_model: str = "claude-opus-4-7"
+    opus_url: str = "https://shiyunapi.com/v1/messages"
+    opus_model: str = "claude-opus-4-8"
 
     clawsocket_key: str = ""
     clawsocket_url: str = ""
@@ -245,6 +245,34 @@ class Settings(BaseSettings):
     def pipeline_strategy(self) -> list[str]:
         """战略产出管道: 提示词设计→多角色验证→审查"""
         return ["prompt_engineer_agent", "crew_collaboration_agent", "code_review_agent"]
+
+    @property
+    def pipeline_full_flow(self) -> list:
+        """全流程管道: 13步5阶段，组内并行，组间顺序。
+        这是 LangGraph full_flow_workflow 的降级方案 (不使用 checkpoint 和审批)。
+
+        阶段1: 需求调研→需求文档
+        阶段2: [原型设计∥可行性评估∥技术选型]→架构设计→[数据库设计∥接口文档]
+        阶段3: 编码开发
+        阶段4: [代码审查∥测试验证]→部署上线
+        阶段5: 验收交付
+        """
+        return [
+            # 阶段1
+            ["crew_collaboration_agent"],                           # 步骤1
+            ["prompt_engineer_agent"],                              # 步骤2
+            # 阶段2 (并行组1 + 架构 + 并行组2)
+            ["ux_interaction_agent", "project_architect_agent"],   # 步骤3-5 并行
+            ["project_architect_agent"],                            # 步骤6
+            ["secure_code_agent"],                                  # 步骤7-8 (DB+API 合并)
+            # 阶段3
+            ["secure_code_agent"],                                  # 步骤9
+            # 阶段4 (并行组3 + 部署)
+            ["code_review_agent", "testing_qa_agent"],             # 步骤10-11 并行
+            ["devops_deploy_agent"],                                # 步骤12
+            # 阶段5
+            ["crew_collaboration_agent", "knowledge_rag_agent"],   # 步骤13
+        ]
 
     # ── URL 快捷属性 ──
 

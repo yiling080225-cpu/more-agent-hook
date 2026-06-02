@@ -49,3 +49,4 @@ references/project/*
 !references/images/.gitkeep
 !references/web/.gitkeep
 !references/project/.gitkeep
+startup.log

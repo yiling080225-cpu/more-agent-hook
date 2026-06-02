@@ -22,6 +22,7 @@ from ..api.schemas import (
 from .registry import agent_registry
 from .a2a_client import a2a_client
 from ..utils._content import extract_text
+from ..monitoring.token_tracker import token_tracker
 
 logger = structlog.get_logger()
 
@@ -116,6 +117,12 @@ class FederationSupervisor:
 
         routing = await self._route_task(user_input, files_markdown=files_markdown)
 
+        # 管道模式优先: agent 为 None 但 is_pipeline=True 时触发多 Agent 协作
+        if routing.get("is_pipeline"):
+            return await self._execute_pipeline(
+                routing, user_input, files_markdown, thread_id
+            )
+
         if routing["agent"] is None:
             return {
                 "thread_id": thread_id,
@@ -127,12 +134,6 @@ class FederationSupervisor:
                 },
                 "requires_human_review": False,
             }
-
-        # 管道模式: 按顺序执行多个 Agent
-        if routing.get("is_pipeline"):
-            return await self._execute_pipeline(
-                routing, user_input, files_markdown, thread_id
-            )
 
         # 单 Agent 模式
         return await self._execute_single(
@@ -151,6 +152,7 @@ class FederationSupervisor:
                 "routing": routing,
                 "result": {"status": "failed", "thread_id": thread_id,
                            "error": f"Agent '{agent_name}' 未注册或不可用"},
+                "errors": [f"Agent '{agent_name}' 未注册"],
                 "requires_human_review": False,
             }
 
@@ -159,63 +161,131 @@ class FederationSupervisor:
             endpoint=agent_url, task=task, agent_name=agent_name, context=user_input.context,
         )
 
+        # 记录 Agent LLM token 消耗
+        self._track_agent_tokens(agent_name, response)
+
+        # 检查并透传 Agent 侧错误
+        errors = []
+        response_dict = response.model_dump()
+        if response.status == TaskStatus.FAILED:
+            agent_error = response.error or response_dict.get("error", "")
+            if not agent_error:
+                inner = response_dict.get("result", {})
+                if isinstance(inner, dict):
+                    agent_error = inner.get("error", "")
+            if agent_error:
+                errors.append(f"[{agent_name}] {agent_error}")
+                logger.warning("agent_execution_failed", agent=agent_name, error=str(agent_error)[:200])
+
         preview_path = self._save_direct_output(
-            routing.get("task_type", ""), response.model_dump(), thread_id
+            routing.get("task_type", ""), response_dict, thread_id
         )
         needs_review = self._assess_review_need(agent_name, response)
 
-        return {
+        result = {
             "thread_id": thread_id,
             "routing": routing,
-            "result": response.model_dump(),
+            "result": response_dict,
             "requires_human_review": needs_review,
             "preview_path": preview_path,
         }
+        if errors:
+            result["errors"] = errors
+        return result
 
     async def _execute_pipeline(
         self, routing: dict, user_input: UserInput, files_markdown: str, thread_id: str
     ) -> Dict[str, Any]:
-        """管道模式: 按顺序执行多个 Agent，前一个输出作为后一个输入"""
+        """管道模式: 支持顺序执行和并行组。
+
+        Flat list: ["agent_a", "agent_b"] → A→B 顺序
+        Nested list: [["agent_a", "agent_b"], "agent_c"] → [A∥B]→C 组内并步组间顺序
+        """
+        import asyncio as _asyncio
+
         pipe_name = routing.get("pipeline", "engineering")
         pipe_map = {
             "design": settings.pipeline_design,
             "engineering": settings.pipeline_engineering,
             "strategy": settings.pipeline_strategy,
+            "full_flow": settings.pipeline_full_flow,
         }
         agents = pipe_map.get(pipe_name, settings.pipeline_engineering)
 
         results = []
-        accumulated_context = user_input.text
+        stage_num = 0
+        all_previous_outputs = []
 
-        for i, agent_name in enumerate(agents):
+        async def _execute_single_agent(agent_name: str, task: dict) -> dict:
+            """执行单个 Agent (供并行组使用)"""
             agent_url = agent_registry.get_agent_url(agent_name)
             if not agent_url:
-                results.append({"agent": agent_name, "status": "skipped", "error": "未注册"})
-                continue
-
-            task = self._build_task(user_input, files_markdown, routing, thread_id)
-            # 管道传递: 后面的 Agent 看到前面 Agent 的产出
-            if i > 0:
-                task["text"] = (
-                    f"上一个 Agent ({agents[i-1]}) 的输出:\n"
-                    f"{str(results[-1].get('result', ''))[:3000]}\n\n"
-                    f"基于以上输出继续处理，原始需求:\n{user_input.text}"
-                )
-                task["pipeline_stage"] = f"{i+1}/{len(agents)}"
-                task["pipeline_agent"] = agent_name
-
+                return {"agent": agent_name, "status": "skipped", "error": "未注册"}
             response = await a2a_client.send_task(
                 endpoint=agent_url, task=task, agent_name=agent_name,
                 context=user_input.context,
             )
-            results.append({
+            return {
                 "agent": agent_name,
-                "stage": i + 1,
                 "result": response.model_dump(),
                 "status": response.status.value,
-            })
-            logger.info("pipeline_stage_complete", agent=agent_name, stage=i+1,
-                        pipeline=pipe_name, thread_id=thread_id)
+            }
+
+        for item in agents:
+            stage_num += 1
+
+            # 检测是否为并行组 (嵌套列表)
+            if isinstance(item, list):
+                # ── 并行组: 组内所有 Agent 并发执行 ──
+                group_agents = item
+                tasks_for_group = []
+                for agent_name in group_agents:
+                    task = self._build_task(user_input, files_markdown, routing, thread_id)
+                    if all_previous_outputs:
+                        task["text"] = (
+                            f"前面阶段的产出汇总:\n"
+                            f"{chr(10).join(all_previous_outputs[-3:])[:4000]}\n\n"
+                            f"基于以上产出继续处理，原始需求:\n{user_input.text}"
+                        )
+                    task["pipeline_stage"] = f"{stage_num}/{len(agents)}"
+                    task["pipeline_agent"] = agent_name
+                    tasks_for_group.append((agent_name, task))
+
+                # asyncio.gather 并行执行
+                group_results = await _asyncio.gather(
+                    *[_execute_single_agent(name, t) for name, t in tasks_for_group],
+                    return_exceptions=True,
+                )
+
+                for r in group_results:
+                    if isinstance(r, Exception):
+                        results.append({"agent": "unknown", "stage": stage_num,
+                                       "status": "failed", "error": str(r)})
+                    else:
+                        r["stage"] = stage_num
+                        results.append(r)
+                        all_previous_outputs.append(str(r.get("result", ""))[:1500])
+                        logger.info("pipeline_parallel_done", agent=r.get("agent"),
+                                    stage=stage_num, pipeline=pipe_name, thread_id=thread_id)
+            else:
+                # ── 顺序执行 ──
+                agent_name = item
+                task = self._build_task(user_input, files_markdown, routing, thread_id)
+                if all_previous_outputs:
+                    task["text"] = (
+                        f"前面阶段的产出汇总:\n"
+                        f"{chr(10).join(all_previous_outputs[-3:])[:4000]}\n\n"
+                        f"基于以上产出继续处理，原始需求:\n{user_input.text}"
+                    )
+                task["pipeline_stage"] = f"{stage_num}/{len(agents)}"
+                task["pipeline_agent"] = agent_name
+
+                r = await _execute_single_agent(agent_name, task)
+                r["stage"] = stage_num
+                results.append(r)
+                all_previous_outputs.append(str(r.get("result", ""))[:1500])
+                logger.info("pipeline_stage_complete", agent=agent_name, stage=stage_num,
+                            pipeline=pipe_name, thread_id=thread_id)
 
         # 管道最终产出写入 preview/
         last = results[-1] if results else {}
@@ -229,7 +299,7 @@ class FederationSupervisor:
             "pipeline": pipe_name,
             "pipeline_results": results,
             "result": last.get("result", {}),
-            "requires_human_review": True,  # 管道产出始终需要审查
+            "requires_human_review": True,
             "preview_path": preview_path,
         }
 
@@ -251,7 +321,7 @@ class FederationSupervisor:
         }
 
     async def _route_task(self, user_input: UserInput, files_markdown: str = "") -> Dict[str, Any]:
-        """路由任务：产出型请求关键词优先，其余走 LLM。"""
+        """路由任务：LLM 优先，确定性产出类型可走快速通道，关键词仅作最终降级。"""
         has_multimodal = bool(
             user_input.images or user_input.videos or user_input.audio or user_input.files
         )
@@ -270,24 +340,31 @@ class FederationSupervisor:
             extra_parts.append(f"[文件内容摘要]\n{snippet}\n[/文件内容摘要]")
         extra = " " + " ".join(extra_parts) if extra_parts else ""
 
-        # 策略 0: 关键词优先 (确定性产出类型 + 管道触发, 绕过 LLM 避免误判)
+        # 策略 0: 确定性产出类型 / 管道触发 — 快速通道，无需 LLM
         kw = self._keyword_routing(user_input, has_multimodal, files_markdown=files_markdown)
-        if kw.get("task_type") in (
+        fast_path_types = (
             "web_page", "svg_diagram", "cad_model", "cad_from_sketch", "build123d_model",
-            "security_audit", "brand_identity", "testing", "devops",
-            "full_stack_project", "brand_design_system", "strategy_proposal",
-        ) or kw.get("is_pipeline"):
+        )
+        if kw.get("task_type") in fast_path_types or kw.get("is_pipeline"):
+            logger.info("route_fast_path", task_type=kw.get("task_type"), agent=kw.get("agent"))
             return kw
 
-        # 策略 1: Gemini 路由
-        if self.router_client:
-            return await self._route_via_gemini(user_input, extra, has_multimodal)
+        # 策略 1: LLM 路由 (主路径) — Gemini / Anthropic Router
+        llm_routing = None
+        if self.router_client and HAS_GENAI:
+            llm_routing = await self._route_via_gemini(user_input, extra, has_multimodal)
+        elif self.router_anthropic:
+            llm_routing = await self._route_via_anthropic(user_input, extra, has_multimodal)
 
-        # 策略 2: Anthropic/DeepSeek 路由
-        if self.router_anthropic:
-            return await self._route_via_anthropic(user_input, extra, has_multimodal)
+        # 策略 2: LLM 路由成功 → 直接返回，附带 LLM 路由的 task_type 覆盖关键词结果
+        if llm_routing and llm_routing.get("agent"):
+            llm_routing["task_type"] = llm_routing.get("task_type") or kw.get("task_type", "")
+            logger.info("route_llm_primary", agent=llm_routing.get("agent"),
+                        reason=llm_routing.get("reason"))
+            return llm_routing
 
-        # 策略 3: 关键词降级
+        # 策略 3: LLM 路由失败或返回 agent=null → 关键词降级
+        logger.info("route_keyword_fallback", agent=kw.get("agent"), reason=kw.get("reason"))
         return kw
 
     async def _route_via_gemini(self, user_input: UserInput, extra: str, has_multimodal: bool) -> Dict[str, Any]:
@@ -300,6 +377,12 @@ class FederationSupervisor:
                     response_mime_type="application/json",
                 ),
             )
+            # 记录 Router LLM token 消耗
+            if hasattr(resp, "usage_metadata") and resp.usage_metadata:
+                router_tokens = getattr(resp.usage_metadata, "total_token_count", 0)
+                if router_tokens:
+                    token_tracker.record(router_tokens, provider="gemini", agent="router",
+                                         model=self.router_model, task_type="routing")
             import json
             routing = json.loads(resp.text)
             if has_multimodal and routing.get("agent") is None:
@@ -316,6 +399,11 @@ class FederationSupervisor:
                 messages=[{"role": "user",
                            "content": f"{ROUTING_PROMPT}\n\n用户输入: {user_input.text}{extra}"}],
             )
+            # 记录 Router LLM token 消耗
+            if hasattr(resp, "usage") and resp.usage:
+                router_tokens = resp.usage.input_tokens + resp.usage.output_tokens
+                token_tracker.record(router_tokens, provider=settings._preferred_provider("router"),
+                                     agent="router", model=self.router_model, task_type="routing")
             import json, re
             text = extract_text(resp.content)
             try:
@@ -389,6 +477,15 @@ class FederationSupervisor:
         workflow_keywords = ["全栈", "从零", "完整项目", "full stack", "完整系统", "端到端项目"]
 
         # ── 管道触发检测 (最高优先级) ──
+        # 全流程触发 (13步端到端)
+        if any(kw in combined_lower for kw in [
+            "全流程", "一条龙", "端到端", "从需求到交付", "完整交付",
+            "全链路", "13步", "13 步", "全套开发", "从头到尾",
+            "从零到一", "从0到1", "start to finish", "end to end",
+        ]):
+            return {"agent": None, "reason": "触发13步全流程管道 (LangGraph工作流)",
+                    "is_pipeline": True, "pipeline": "full_flow",
+                    "task_type": "full_flow_project"}
         # 全栈项目 -> 工程管道
         if any(kw in combined_lower for kw in [
             "完整网站", "全栈应用", "完整系统", "电商系统", "管理后台",
@@ -521,6 +618,35 @@ class FederationSupervisor:
         if response.requires_human_review:
             return True
         return False
+
+    def _track_agent_tokens(self, agent_name: str, response: A2ATaskResponse) -> None:
+        """从 Agent 响应中提取并记录 token 消耗"""
+        try:
+            result = response.result or {}
+            if not isinstance(result, dict):
+                return
+            tokens = result.get("tokens_used", 0)
+            if not tokens:
+                # 可能嵌套在 result.result 中
+                inner = result.get("result", {})
+                if isinstance(inner, dict):
+                    tokens = inner.get("tokens_used", 0)
+            if tokens:
+                model = result.get("model_used", "")
+                # 从 AGENT_LLM_MAP 反查 provider
+                agent_short = agent_name.replace("_agent", "").replace("secure_code", "code") \
+                    .replace("code_review", "review").replace("multimodal_design", "multimodal") \
+                    .replace("testing_qa", "test").replace("devops_deploy", "devops") \
+                    .replace("project_architect", "architect").replace("prompt_engineer", "prompt") \
+                    .replace("crew_collaboration", "crew").replace("knowledge_rag", "knowledge") \
+                    .replace("security_audit", "security").replace("ux_interaction", "ux") \
+                    .replace("brand_creative", "brand")
+                provider = settings._preferred_provider(agent_short)
+                token_tracker.record(tokens, provider=provider, agent=agent_name,
+                                     model=model, task_type="agent_execute",
+                                     success=response.status != TaskStatus.FAILED)
+        except Exception as e:
+            logger.warning("token_tracking_error", error=str(e))
 
     def track_workflow(self, thread_id: str, state: Dict[str, Any]):
         self._active_workflows[thread_id] = state
